@@ -8,3 +8,19 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Generated data (regenerable from scripts)
+data/processed/
+data/raw/
+
+# Generated figures (regenerable from scripts)
+# figures/
+
+# LaTeX build artifacts
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+
+# Lockfile
+uv.lock
