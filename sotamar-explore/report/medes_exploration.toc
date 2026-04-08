@@ -1,0 +1,21 @@
+\babel@toc {english}{}\relax 
+\contentsline {section}{\numberline {1}Introduction}{3}{section.1}%
+\contentsline {section}{\numberline {2}Data Source: ICGC Bathymetry}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Dataset Description}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}COG URL Discovery}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Remote COG Access}{3}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Study Area: Illes Medes}{4}{section.3}%
+\contentsline {section}{\numberline {4}Terrain Morphometrics}{4}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Slope}{4}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Bathymetric Position Index (BPI)}{5}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Vector Ruggedness Measure (VRM)}{6}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Multi-Panel Comparison}{6}{subsection.4.4}%
+\contentsline {section}{\numberline {5}Depth Profile Analysis}{7}{section.5}%
+\contentsline {section}{\numberline {6}Coast-Wide Analysis}{7}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Site Selection}{8}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Terrain Character Comparison}{8}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Comparative Statistics}{8}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Case Study: El Biotop Artificial Reef}{9}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Analysis}{10}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Interpretation}{10}{subsection.7.2}%
+\contentsline {section}{\numberline {8}Discussion and Conclusions}{11}{section.8}%
