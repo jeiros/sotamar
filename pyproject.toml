@@ -1,0 +1,26 @@
+[project]
+name = "sotamar"
+version = "0.1.0"
+description = "Bathymetric terrain analysis for Catalan coast dive sites"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "click>=8.1",
+    "geopy>=2.4",
+    "matplotlib>=3.9",
+    "numpy>=2.0",
+    "pyproj>=3.6",
+    "rasterio>=1.4",
+    "scipy>=1.14",
+]
+
+[project.scripts]
+sotamar = "sotamar.cli:cli"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

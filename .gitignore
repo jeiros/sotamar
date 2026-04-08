@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# Data (large files, generated)
+data/icgc/
+data/sites/
+
+# IDE
+.idea/
+.vscode/
+*.swp
