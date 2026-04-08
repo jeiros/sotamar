@@ -19,10 +19,10 @@ from rasterio.windows import from_bounds
 COG_URL = "https://datacloud.icgc.cat/datacloud/batimetria/tif_unzip/batimetria-v2r1-elevacions-2021-2025.tif"
 
 # Illes Medes extraction window (EPSG:25831 UTM coordinates)
-MEDES_LEFT = 515800
-MEDES_BOTTOM = 4654800
-MEDES_RIGHT = 517800
-MEDES_TOP = 4656800
+MEDES_LEFT = 517400
+MEDES_BOTTOM = 4654100
+MEDES_RIGHT = 519400
+MEDES_TOP = 4656100
 
 OUTPUT_PATH = Path("data/processed/medes_bathy.tif")
 

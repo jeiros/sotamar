@@ -60,9 +60,8 @@ Optimized GeoTIFF (COG) remote reading, perform a detailed pilot analysis at the
 Medes Marine Protected Area, and extend the terrain analysis to six sites spanning the
 full 240\,km coastline. Four morphometrics are computed at each site: slope, fine-scale and
 broad-scale Bathymetric Position Index (BPI), and Vector Ruggedness Measure (VRM).
-Cross-site comparison reveals that VRM is the most consistent single discriminator of
-dive-relevant terrain, correctly separating geomorphologically interesting sites from
-featureless shelf. A case study of El Biotop artificial reef (Torredembarra) exposes a
+Cross-site comparison reveals that VRM provides a consistent gradient of terrain
+complexity across all six sites, aligning well with known dive site character. A case study of El Biotop artificial reef (Torredembarra) exposes a
 temporal limitation: the 22\,m-tall structure is absent from the data, indicating that
 survey acquisition predates its 2023 construction.
 \end{abstract}
@@ -151,14 +150,14 @@ with Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
          GDAL_HTTP_MERGE_CONSECUTIVE_RANGES="YES",
          VSI_CACHE=True, VSI_CACHE_SIZE=5_000_000):
     with rasterio.open(COG_URL) as src:
-        window = from_bounds(515800, 4654800, 517800, 4656800,
+        window = from_bounds(517400, 4654100, 519400, 4656100,
                              transform=src.transform)
         data = src.read(1, window=window)
 \end{lstlisting}
 
 This extracted a \num{2000}~$\times$~\num{2000} pixel window in under 10 seconds over a
 standard network connection. The extracted subset was saved as a local GeoTIFF with LZW
-compression (\SI{5.3}{MB}) for subsequent analysis.
+compression (\SI{8.9}{MB}) for subsequent analysis.
 
 %=============================================================================
 \section{Study Area: Illes Medes}
@@ -166,7 +165,7 @@ compression (\SI{5.3}{MB}) for subsequent analysis.
 %=============================================================================
 
 The extraction window covers a 2\,km~$\times$~2\,km area centered on the Medes Islands
-(approximate center: 516\,800\,E, 4\,655\,800\,N in EPSG:25831). Table~\ref{tab:stats}
+(approximate center: 518\,400\,E, 4\,655\,100\,N in EPSG:25831). Table~\ref{tab:stats}
 summarizes the elevation statistics.
 
 \begin{table}[ht]
@@ -177,19 +176,21 @@ summarizes the elevation statistics.
 \toprule
 Statistic       & Value \\
 \midrule
-Minimum         & \SI{-34.70}{m} \\
-Maximum         & \SI{+98.60}{m} \\
-Mean            & \SI{-7.02}{m} \\
-Standard dev.   & \SI{15.83}{m} \\
-NoData pixels   & \num{2174326} (54.4\%) \\
+Minimum         & \SI{-61.55}{m} \\
+Maximum         & \SI{+86.34}{m} \\
+Mean            & \SI{-23.69}{m} \\
+Standard dev.   & \SI{23.41}{m} \\
+NoData pixels   & \num{724433} (18.1\%) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The maximum elevation of \SI{+98.6}{m} corresponds to the emerged rocky outcrops of the
-islands, confirming that the ICGC dataset includes topography above the geoid, not only
-submerged bathymetry. The high NoData percentage reflects the survey's coastal extent: the
-western half of the window falls outside the mapped littoral fringe.
+The maximum elevation of \SI{+86.3}{m} corresponds to the summit of Meda Gran, the
+largest island in the archipelago, confirming that the ICGC dataset includes topography
+above the geoid, not only submerged bathymetry. The strongly negative mean (\SI{-23.7}{m})
+reflects the predominantly submarine character of the window, with the island group
+occupying only a fraction of the 4\,km\textsuperscript{2} area. The 18.1\% NoData
+corresponds to the deep-water western margin beyond the survey's littoral fringe.
 
 Figure~\ref{fig:bathymetry} shows the extracted bathymetry with 5\,m contour lines and a
 corresponding hillshade visualization.
@@ -199,9 +200,10 @@ corresponding hillshade visualization.
 \includegraphics[width=\textwidth]{medes_bathymetry.pdf}
 \caption{Illes Medes bathymetry. \textbf{Left:} Elevation with 5\,m contour intervals
 (viridis colormap). \textbf{Right:} Analytical hillshade (azimuth 315\textdegree,
-altitude 45\textdegree, vertical exaggeration 2$\times$). The Medes Islands are visible
-as emerged outcrops in the northeast, with steep submarine walls descending to
-\SI{-20}{m} to the west.}
+altitude 45\textdegree, vertical exaggeration 2$\times$). The Medes archipelago is
+clearly visible as emerged outcrops in the center-east, with steep submarine walls
+descending to \SI{-50}{m} and beyond. The complex island topography---walls, pinnacles,
+and inter-island channels---is well resolved at 1\,m resolution.}
 \label{fig:bathymetry}
 \end{figure}
 
@@ -236,7 +238,7 @@ slope_deg = np.degrees(slope_rad)
 \end{lstlisting}
 
 The resulting slope ranges from 0\textdegree\ to 88.9\textdegree\ (mean
-6.1\textdegree, $\sigma$ = 12.1\textdegree). The near-vertical maxima occur at the
+6.6\textdegree, $\sigma$ = 12.3\textdegree). The near-vertical maxima occur at the
 cliff faces of the islands, which represent classic wall dive topography.
 
 \subsection{Bathymetric Position Index (BPI)}
@@ -278,7 +280,7 @@ bpi = elevation - annular_mean
 
 Table~\ref{tab:bpi} summarizes the BPI statistics. The near-zero means confirm correct
 implementation (BPI is a zero-mean statistic by construction over large areas). The
-substantially larger spread at broad scale ($\sigma = 6.1$\,m vs.\ $1.1$\,m) indicates
+substantially larger spread at broad scale ($\sigma = 4.7$\,m vs.\ $0.7$\,m) indicates
 that the dominant terrain structure at Illes Medes operates at the 25--50\,m scale,
 consistent with the geomorphology of rocky island groups.
 
@@ -290,8 +292,8 @@ consistent with the geomorphology of rocky island groups.
 \toprule
 Scale & {Min (m)} & {Max (m)} & {Mean (m)} & {Std (m)} \\
 \midrule
-Fine ($r$ = 3--5\,m)   & -45.949 & 47.719 & 0.000 & 1.063 \\
-Broad ($r$ = 25--50\,m) & -55.079 & 57.659 & 0.157 & 6.053 \\
+Fine ($r$ = 3--5\,m)   & -45.949 & 41.941 & 0.000 & 0.739 \\
+Broad ($r$ = 25--50\,m) & -43.913 & 81.010 & 0.029 & 4.673 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -332,7 +334,7 @@ vrm = 1.0 - (resultant / n)
 \end{lstlisting}
 
 VRM ranges from 0 (perfectly flat) to 1 (maximally rugged). The observed range of 0 to
-0.904 (mean 0.005, $\sigma$ = 0.027) indicates that the seafloor is overwhelmingly
+0.818 (mean 0.003, $\sigma$ = 0.022) indicates that the seafloor is overwhelmingly
 smooth, with ruggedness concentrated at the island cliff edges. Values above 0.3 cluster
 exclusively around the steep rocky perimeters---precisely the features that define
 high-quality wall and cave dive sites.
@@ -358,30 +360,36 @@ colormap centered at zero (red = ridges, blue = depressions).}
 \label{sec:profile}
 %=============================================================================
 
-An east--west transect at northing \SI{4655600}{m} was extracted across the study area
-(Figure~\ref{fig:profile}). The profile reveals:
+An east--west transect at northing \SI{4655100}{m} was extracted across the study area,
+cutting through the heart of the Medes archipelago (Figure~\ref{fig:profile}). The
+profile reveals:
 
 \begin{enumerate}
-\item A shallow emerged platform (0--3\,m above sea level) corresponding to the island
-    group, spanning approximately 500\,m horizontally.
-\item A steep submarine wall descending from sea level to approximately \SI{-15}{m} over
-    less than \SI{50}{m} of horizontal distance---a gradient exceeding 16\textdegree.
-\item A gradual deepening to approximately \SI{-20}{m} over the remaining 500\,m eastward.
+\item Open water at approximately \SI{-20}{m} depth on the western approach, deepening
+    gradually from the shelf.
+\item The emerged island platform rising dramatically from the seafloor to over
+    \SI{+70}{m} above sea level (Meda Gran summit), spanning approximately 400\,m
+    horizontally.
+\item A steep eastern submarine wall descending from the island back to
+    \SI{-50}{m} over less than \SI{200}{m} of horizontal distance---a gradient exceeding
+    30\textdegree, characteristic of the dramatic wall dives for which the Medes are
+    renowned.
 \end{enumerate}
 
 Recreational diving certification thresholds are annotated: Open Water Diver (OWD,
 \SI{12}{m}), Advanced Open Water Diver (AOWD, \SI{18}{m}), Deep Diver (\SI{30}{m}), and
-the recreational limit (\SI{40}{m}). The Medes site reaches AOWD-accessible depths
-within the survey extent, confirming its suitability for intermediate-level recreational
-diving.
+the recreational limit (\SI{40}{m}). The Medes site reaches Deep Diver depths on both
+flanks and approaches the recreational limit on the east side, confirming the site's
+suitability for a range of certification levels from intermediate to advanced.
 
 \begin{figure}[ht]
 \centering
 \includegraphics[width=\textwidth]{medes_depth_profile.pdf}
-\caption{Depth profile along an E--W transect at $N$ = \SI{4655600}{m}. Dashed horizontal
-lines indicate recreational diving certification depth limits. The steep wall feature
-(\SI{0}{m} to \SI{-15}{m} over $\sim$\SI{50}{m} horizontal) is characteristic of the
-island cliff morphology.}
+\caption{Depth profile along an E--W transect at $N$ = \SI{4655100}{m}, crossing the
+Medes archipelago. Dashed horizontal lines indicate recreational diving certification
+depth limits. The dramatic eastern wall (\SI{0}{m} to \SI{-50}{m} over
+$\sim$\SI{200}{m} horizontal) is the defining feature of this internationally renowned
+dive site.}
 \label{fig:profile}
 \end{figure}
 
@@ -420,12 +428,12 @@ EPSG:25831.}
 \toprule
 Site & Label & Easting & Northing & Character \\
 \midrule
-1 & Roses              & 520\,000 & 4\,686\,500 & Rocky cape, steep cliffs \\
-2 & Illes Medes        & 516\,800 & 4\,655\,800 & Island MPA, walls \& tunnels \\
-3 & Illes Formigues    & 515\,500 & 4\,636\,000 & Rocky islets, gentle shelf \\
-4 & Tossa de Mar       & 494\,500 & 4\,619\,500 & Medieval coast, steep cliffs \\
-5 & Costa del Garraf    & 406\,500 & 4\,565\,000 & Smooth continental shelf \\
-6 & Cap de Salou       & 345\,500 & 4\,547\,500 & Rocky cape, moderate relief \\
+1 & Roses              & 520\,100 & 4\,677\,000 & Rocky cape, steep cliffs \\
+2 & Illes Medes        & 518\,400 & 4\,655\,100 & Island MPA, walls \& tunnels \\
+3 & Illes Formigues    & 515\,400 & 4\,634\,500 & Rocky islets, gentle shelf \\
+4 & Tossa de Mar       & 495\,100 & 4\,618\,900 & Rocky coast, steep cliffs \\
+5 & Costa del Garraf   & 403\,200 & 4\,565\,300 & Rocky coast, moderate cliffs \\
+6 & Cap de Salou       & 344\,800 & 4\,547\,200 & Rocky cape, moderate relief \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -433,9 +441,9 @@ Site & Label & Easting & Northing & Character \\
 \subsection{Terrain Character Comparison}
 
 Figure~\ref{fig:hillshades} shows the hillshade with depth overlay for each site,
-revealing markedly different terrain character. Roses and Tossa de Mar display steep
-coastal cliffs descending to $-$40--50\,m, while Costa del Garraf is a uniformly smooth
-shelf with barely 20\,m of relief across the entire 2\,km window.
+revealing markedly different terrain character. Roses displays the steepest coastal
+cliffs, while all sites show a mixture of emerged rocky coast and submerged terrain
+with varying degrees of complexity.
 
 \begin{figure}[ht]
 \centering
@@ -459,12 +467,12 @@ Table~\ref{tab:comparison} summarizes the terrain metrics across all sites.
 Site & {Mean slope (\textdegree)} & {Max slope (\textdegree)} &
 {Mean VRM} & {Broad BPI $\sigma$ (m)} \\
 \midrule
-Roses           & 16.1 & 89.0 & 0.0070 & 5.32 \\
-Illes Medes     &  6.1 & 88.9 & 0.0050 & 6.05 \\
-Illes Formigues &  5.1 & 87.0 & 0.0030 & 2.77 \\
-Tossa de Mar    & 11.2 & 89.0 & 0.0080 & 5.32 \\
-Costa del Garraf &  0.7 & 20.8 & 0.0010 & 0.10 \\
-Cap de Salou    &  5.4 & 85.8 & 0.0070 & 3.34 \\
+Roses           & 12.0 & 88.0 & 0.0050 & 4.56 \\
+Illes Medes     &  6.6 & 88.9 & 0.0030 & 4.67 \\
+Illes Formigues &  5.9 & 82.3 & 0.0030 & 1.60 \\
+Tossa de Mar    &  6.6 & 88.0 & 0.0040 & 3.75 \\
+Costa del Garraf &  3.0 & 85.2 & 0.0020 & 2.45 \\
+Cap de Salou    &  2.7 & 86.5 & 0.0030 & 1.91 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -472,24 +480,27 @@ Cap de Salou    &  5.4 & 85.8 & 0.0070 & 3.34 \\
 Several patterns emerge:
 
 \begin{enumerate}
-\item \textbf{Roses and Tossa de Mar} are the steepest sites, with mean slopes of
-    16.1\textdegree\ and 11.2\textdegree\ respectively, and the highest VRM values
-    (0.007--0.008). Both are known for dramatic cliff-face diving.
+\item \textbf{Roses} is the steepest site, with a mean slope of 12.0\textdegree\ and
+    the highest VRM (0.005). Its combination of steep cliffs and high ruggedness is
+    consistent with its reputation for dramatic cliff-face diving.
 
-\item \textbf{Costa del Garraf} stands in stark contrast: mean slope 0.7\textdegree,
-    maximum slope only 20.8\textdegree, VRM effectively zero (0.001), and broad BPI
-    $\sigma$ = 0.10\,m. This is a featureless sandy shelf---terrain metrics correctly
-    identify it as having no geomorphological interest for dive site characterization.
+\item \textbf{All six sites show near-vertical maximum slopes} (82--89\textdegree),
+    indicating that even sites with moderate \emph{mean} slope contain localized steep
+    features---rocky outcrops, cliff edges, or coastal bluffs. This suggests that max
+    slope alone is insufficient for site discrimination; mean slope and VRM better
+    capture the overall terrain character.
 
 \item \textbf{Broad BPI standard deviation} separates sites more cleanly than
-    mean slope: Illes Medes has the highest $\sigma$ (6.05\,m) despite moderate mean
-    slope, because the islands create strong positive anomalies surrounded by channels.
-    This confirms that BPI captures terrain \emph{position} (ridges vs.\ depressions)
-    independently of gradient magnitude.
+    mean slope: Illes Medes has the highest $\sigma$ (4.67\,m) alongside Roses
+    (4.56\,m), despite lower mean slope, because the islands create strong positive
+    anomalies surrounded by channels. This confirms that BPI captures terrain
+    \emph{position} (ridges vs.\ depressions) independently of gradient magnitude.
 
-\item \textbf{VRM is the most consistent discriminator} of ``interesting'' terrain.
-    Sites known for quality diving (Roses, Medes, Tossa, Salou) all have
-    VRM~$\geq$~0.005, while the featureless Garraf shelf scores 0.001.
+\item \textbf{VRM provides a gradient of terrain complexity} across the coast.
+    Roses (0.005) and Tossa de Mar (0.004) lead, followed by the island sites
+    (Medes, Formigues, Salou at 0.003), with Garraf lowest (0.002). Rather than a
+    binary ``interesting/featureless'' split, the metrics reveal a continuum of
+    terrain complexity that could inform dive site grading systems.
 \end{enumerate}
 
 Figure~\ref{fig:boxplots} shows the full metric distributions as box plots, confirming
@@ -499,9 +510,9 @@ the statistical separation.
 \centering
 \includegraphics[width=\textwidth]{coast_metric_comparison.pdf}
 \caption{Box plot comparison of terrain metric distributions across six Catalan coast
-dive sites. Outliers suppressed for clarity. Roses and Tossa de Mar consistently show
-the widest distributions (steepest, most variable terrain), while Costa del Garraf is
-nearly uniform across all metrics.}
+dive sites. Outliers suppressed for clarity. Roses consistently shows the widest
+distributions (steepest, most variable terrain), with Tossa de Mar and Illes Medes
+following.}
 \label{fig:boxplots}
 \end{figure}
 
@@ -519,8 +530,8 @@ sunfish (\emph{Mola mola}) in Catalonia, making it a significant dive destinatio
 
 \subsection{Analysis}
 
-The reported coordinates (41.130\textdegree\,N, 1.430\textdegree\,E; UTM:
-368\,222\,E, 4\,554\,372\,N) were converted to EPSG:25831 and a
+The reported coordinates (41.130\textdegree\,N, 1.432\textdegree\,E; UTM:
+368\,413\,E, 4\,554\,332\,N) were converted to EPSG:25831 and a
 500\,m~$\times$~500\,m window was extracted at full 1\,m resolution
 (Figure~\ref{fig:biotop}). All four terrain metrics were computed.
 
@@ -590,13 +601,15 @@ limitations through the Biotop case study. Key findings:
 \item \textbf{Metric complementarity.} No single metric fully characterizes dive site
     terrain. Slope identifies steep walls. Broad-scale BPI distinguishes ridges from
     channels. VRM isolates terrain heterogeneity. The coast-wide comparison demonstrates
-    that these metrics are complementary: Illes Medes scores highest on BPI
-    variability but only moderate on slope, while Roses leads on slope but not BPI.
+    that these metrics are complementary: Roses leads on slope, Medes shows
+    the highest BPI variability despite moderate slope, and Tossa de Mar
+    ranks second on VRM despite moderate mean slope.
 
-\item \textbf{VRM as a dive site discriminator.} Across all six sites, VRM proved the
-    most consistent single metric for separating sites with known dive interest from
-    featureless terrain. A threshold of VRM~$>$~0.003 correctly separates the five
-    geomorphologically interesting sites from the Garraf shelf.
+\item \textbf{VRM as a terrain complexity indicator.} Across all six sites, VRM
+    provides a consistent gradient of terrain complexity, from the steepest sites
+    (Roses: 0.005) through moderate complexity (Tossa: 0.004, island sites: 0.003)
+    to the gentlest terrain (Garraf: 0.002). This gradient aligns well with known
+    dive site character and could inform automated dive site scoring.
 
 \item \textbf{Scale sensitivity.} Fine-scale BPI ($r$ = 3--5\,m) shows minimal variation
     at all sites, confirming that dive-relevant terrain structure operates at scales of
@@ -610,15 +623,16 @@ limitations through the Biotop case study. Key findings:
     changes, cross-referenced by installation date and survey vintage.
 
 \item \textbf{Coverage limitations.} The ICGC survey covers only the littoral fringe to
-    approximately $-$50\,m depth. Northern sites (Roses) have sparser coverage than
-    central Costa Brava sites (Formigues: 82\% valid). Any automated pipeline must handle
-    variable NoData density across the coast.
+    approximately $-$60\,m depth. Coverage varies from 52\% (Roses) to 85\% (Formigues),
+    with all sites containing a mixture of submerged bathymetry and emerged coastal
+    topography. Any automated pipeline must handle variable NoData density across the
+    coast.
 \end{enumerate}
 
 The next step is to implement a terrain classification scheme based on combined BPI and
 slope thresholds following the Benthic Terrain Modeler methodology
 \citep{lundblad2006}, and to systematically score the full coastline for dive site
-potential using the VRM-based discriminator identified here. The Biotop case also
+potential using the VRM-based complexity gradient identified here. The Biotop case also
 motivates integrating temporal metadata (survey acquisition dates per swath) into the
 SotaMar pipeline to flag areas where the bathymetry may be outdated.
 

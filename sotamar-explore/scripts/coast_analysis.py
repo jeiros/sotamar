@@ -30,12 +30,12 @@ HALF = 1000  # 1 km each direction → 2 km × 2 km windows
 
 # Sites: (key, label, center_easting, center_northing)
 SITES = [
-    ("roses",     "Roses",             520000, 4686500),
-    ("medes",     "Illes Medes",       516800, 4655800),
-    ("formigues", "Illes Formigues",   515500, 4636000),
-    ("tossa",     "Tossa de Mar",      494500, 4619500),
-    ("garraf",    "Costa del Garraf",   406500, 4565000),
-    ("salou",     "Cap de Salou",      345500, 4547500),
+    ("roses",     "Roses",             520100, 4677000),
+    ("medes",     "Illes Medes",       518400, 4655100),
+    ("formigues", "Illes Formigues",   515400, 4634500),
+    ("tossa",     "Tossa de Mar",      495100, 4618900),
+    ("garraf",    "Costa del Garraf",   403200, 4565300),
+    ("salou",     "Cap de Salou",      344800, 4547200),
 ]
 
 GDAL_ENV = {

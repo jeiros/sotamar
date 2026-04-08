@@ -153,8 +153,8 @@ def plot_depth_profile():
 
     # E-W transect crossing from deep water to coast, south of Medes Islands
     # Adjust these coordinates after inspecting the bathymetry figure
-    start = (515900, 4655600)   # (easting, northing) — deep water (west)
-    end = (517700, 4655600)     # coast/shallow (east)
+    start = (517500, 4655100)   # (easting, northing) — deep water (west)
+    end = (519300, 4655100)     # coast/shallow (east)
 
     n_points = 500
     xs = np.linspace(start[0], end[0], n_points)
