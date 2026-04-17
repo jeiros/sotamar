@@ -13,6 +13,7 @@ from sotamar.io import (
     read_bathymetry_window,
     save_geotiff,
     compute_stats,
+    compute_depth_zone_pcts,
     save_stats,
     find_cog,
 )
@@ -21,6 +22,7 @@ from sotamar.terrain import (
     compute_hillshade,
     compute_bpi,
     compute_vrm,
+    compute_depth_zones,
 )
 from sotamar.profile import extract_depth_profile
 from sotamar.figures import plot_terrain_analysis, plot_depth_profile
@@ -132,6 +134,11 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
     vrm = compute_vrm(elevation, mask, window_size=3)
     click.echo(f"    {time.time() - t0:.1f}s")
 
+    click.echo("  Classifying depth zones...")
+    t0 = time.time()
+    depth_zones = compute_depth_zones(elevation, mask)
+    click.echo(f"    {time.time() - t0:.1f}s")
+
     # 4. Save GeoTIFFs
     click.echo("  Saving GeoTIFFs...")
     for name, array in [
@@ -141,6 +148,7 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
         ("bpi_fine", bpi_fine),
         ("bpi_broad", bpi_broad),
         ("vrm", vrm),
+        ("depth_zones", depth_zones),
     ]:
         save_geotiff(array, profile, output_dir / f"{name}.tif")
 
@@ -151,8 +159,14 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
          "bpi_broad": bpi_broad, "vrm": vrm},
         mask,
     )
+    stats["depth_zones"] = compute_depth_zone_pcts(depth_zones)
     stats["slug"] = site.slug
     stats["name"] = site.name
+    stats["easting"] = site.easting
+    stats["northing"] = site.northing
+    stats["half_size"] = site.half_size
+    stats["region"] = site.region
+    stats["character"] = site.character
     save_stats(stats, output_dir / "stats.json")
 
     # 6. Extract depth profile
@@ -165,7 +179,7 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
     # 7. Generate figures
     click.echo("  Generating terrain analysis figure...")
     plot_terrain_analysis(
-        elevation, slope, bpi_fine, bpi_broad, vrm,
+        elevation, slope, bpi_fine, bpi_broad, vrm, depth_zones,
         site.bounds, site.name, output_dir,
     )
 

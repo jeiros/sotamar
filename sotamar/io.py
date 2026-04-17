@@ -142,6 +142,25 @@ def compute_stats(
     return stats
 
 
+def compute_depth_zone_pcts(zones: np.ndarray) -> dict:
+    """Percentages of submerged area in each dive zone (NaN pixels excluded).
+
+    Returns dict with owd_pct, aowd_pct, deep_pct, tech_pct. If the zones
+    array is entirely NaN, all values are None.
+    """
+    keys = ("owd_pct", "aowd_pct", "deep_pct", "tech_pct")
+    valid = zones[~np.isnan(zones)]
+    if valid.size == 0:
+        return {k: None for k in keys}
+    total = valid.size
+    return {
+        "owd_pct":  round(float((valid == 1).sum() / total * 100), 2),
+        "aowd_pct": round(float((valid == 2).sum() / total * 100), 2),
+        "deep_pct": round(float((valid == 3).sum() / total * 100), 2),
+        "tech_pct": round(float((valid == 4).sum() / total * 100), 2),
+    }
+
+
 def save_stats(stats: dict, path: Path) -> None:
     """Write stats dict as formatted JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)

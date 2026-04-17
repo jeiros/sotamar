@@ -63,21 +63,22 @@ class TestPlotTerrainAnalysis:
         bpi_fine = rng.uniform(-5, 5, shape).astype(np.float32)
         bpi_broad = rng.uniform(-10, 10, shape).astype(np.float32)
         vrm = rng.uniform(0, 0.1, shape).astype(np.float32)
+        zones = rng.integers(1, 5, shape).astype(np.float32)
         bounds = (500000, 4599950, 500050, 4600000)
-        return elev, slope, bpi_fine, bpi_broad, vrm, bounds
+        return elev, slope, bpi_fine, bpi_broad, vrm, zones, bounds
 
     def test_creates_png_and_pdf(self, tmp_path, synthetic_metrics):
-        elev, slope, bpi_fine, bpi_broad, vrm, bounds = synthetic_metrics
+        elev, slope, bpi_fine, bpi_broad, vrm, zones, bounds = synthetic_metrics
         out = tmp_path / "site_output"
-        plot_terrain_analysis(elev, slope, bpi_fine, bpi_broad, vrm, bounds, "Test", out)
+        plot_terrain_analysis(elev, slope, bpi_fine, bpi_broad, vrm, zones, bounds, "Test", out)
 
         assert (out / "terrain_analysis.png").exists()
         assert (out / "terrain_analysis.pdf").exists()
 
     def test_png_not_empty(self, tmp_path, synthetic_metrics):
-        elev, slope, bpi_fine, bpi_broad, vrm, bounds = synthetic_metrics
+        elev, slope, bpi_fine, bpi_broad, vrm, zones, bounds = synthetic_metrics
         out = tmp_path / "site_output"
-        plot_terrain_analysis(elev, slope, bpi_fine, bpi_broad, vrm, bounds, "Test", out)
+        plot_terrain_analysis(elev, slope, bpi_fine, bpi_broad, vrm, zones, bounds, "Test", out)
 
         assert (out / "terrain_analysis.png").stat().st_size > 1000
 
@@ -94,10 +95,12 @@ class TestPlotTerrainAnalysis:
         bpi_broad[10:40, 10:40] = 0.0
         vrm = np.full(shape, np.nan, dtype=np.float32)
         vrm[10:40, 10:40] = 0.001
+        zones = np.full(shape, np.nan, dtype=np.float32)
+        zones[10:40, 10:40] = 3.0
 
         bounds = (0, 0, 50, 50)
         out = tmp_path / "nan_test"
-        plot_terrain_analysis(elev, slope, bpi_fine, bpi_broad, vrm, bounds, "NaN", out)
+        plot_terrain_analysis(elev, slope, bpi_fine, bpi_broad, vrm, zones, bounds, "NaN", out)
         assert (out / "terrain_analysis.png").exists()
 
 

@@ -8,6 +8,7 @@ import pytest
 from sotamar.terrain import (
     _make_annular_kernel,
     compute_bpi,
+    compute_depth_zones,
     compute_hillshade,
     compute_slope,
     compute_vrm,
@@ -261,3 +262,54 @@ class TestComputeVrm:
         valid3 = vrm3[30:-30, 30:-30][~np.isnan(vrm3[30:-30, 30:-30])]
         valid5 = vrm5[30:-30, 30:-30][~np.isnan(vrm5[30:-30, 30:-30])]
         assert not np.allclose(valid3, valid5)
+
+
+# -- Depth zones --------------------------------------------------------------
+
+class TestComputeDepthZones:
+    def test_returns_float32(self, flat_surface):
+        elev, mask = flat_surface
+        zones = compute_depth_zones(elev, mask)
+        assert zones.dtype == np.float32
+
+    def test_same_shape_as_input(self, flat_surface):
+        elev, mask = flat_surface
+        zones = compute_depth_zones(elev, mask)
+        assert zones.shape == elev.shape
+
+    def test_zone_assignment(self):
+        """Each depth should map to the correct zone."""
+        # Depths spanning all zones plus emerged
+        elev = np.array([5.0, 0.0, -10.0, -18.0, -25.0, -30.0, -35.0, -40.0, -50.0],
+                        dtype=np.float32).reshape(1, -1)
+        mask = np.zeros_like(elev, dtype=bool)
+        zones = compute_depth_zones(elev, mask)
+        # emerged (5.0) -> NaN; 0.0 -> zone 1; -10 -> zone 1; -18 -> zone 2 (boundary, deeper);
+        # -25 -> zone 2; -30 -> zone 3 (boundary); -35 -> zone 3; -40 -> zone 4 (boundary); -50 -> zone 4
+        expected = np.array([np.nan, 1, 1, 2, 2, 3, 3, 4, 4], dtype=np.float32)
+        np.testing.assert_array_equal(np.isnan(zones[0]), np.isnan(expected))
+        valid = ~np.isnan(expected)
+        np.testing.assert_array_equal(zones[0][valid], expected[valid])
+
+    def test_emerged_is_nan(self):
+        """Elevation > 0 should produce NaN."""
+        elev = np.array([[1.0, 10.0, 0.1]], dtype=np.float32)
+        mask = np.zeros_like(elev, dtype=bool)
+        zones = compute_depth_zones(elev, mask)
+        assert np.all(np.isnan(zones))
+
+    def test_nodata_is_nan(self):
+        """Masked pixels should produce NaN regardless of elevation value."""
+        elev = np.array([[-25.0, -25.0, -25.0]], dtype=np.float32)
+        mask = np.array([[True, False, True]])
+        zones = compute_depth_zones(elev, mask)
+        assert np.isnan(zones[0, 0])
+        assert zones[0, 1] == 2.0  # -25 -> AOWD
+        assert np.isnan(zones[0, 2])
+
+    def test_only_submerged_zones_1_to_4(self, peaked_surface):
+        """All non-NaN output values must be in {1, 2, 3, 4}."""
+        elev, mask = peaked_surface
+        zones = compute_depth_zones(elev, mask)
+        valid = zones[~np.isnan(zones)]
+        assert set(np.unique(valid).tolist()).issubset({1.0, 2.0, 3.0, 4.0})

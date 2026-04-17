@@ -90,7 +90,7 @@ _register(Site(
 _register(Site(
     slug="costa_del_garraf",
     name="Costa del Garraf",
-    easting=403200,
+    easting=409200,
     northing=4565300,
     region="Costa del Garraf",
     character="Smooth continental shelf",

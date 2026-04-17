@@ -98,6 +98,29 @@ def compute_vrm(
     return vrm
 
 
+def compute_depth_zones(elevation: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Classify bathymetry into recreational dive zones (1-4).
+
+    Zones: 1=OWD (0 to -18 m), 2=AOWD (-18 to -30 m), 3=Deep / rec limit
+    (-30 to -40 m), 4=Technical (below -40 m). Emerged pixels (elev > 0) and
+    nodata pixels are NaN. Boundary values fall in the deeper zone
+    (e.g. -18.0 -> zone 2).
+    """
+    elev = elevation.astype(np.float64)
+    elev[mask] = np.nan
+
+    conditions = [
+        elev <= -40.0,
+        elev <= -30.0,
+        elev <= -18.0,
+        elev <= 0.0,
+    ]
+    choices = [4.0, 3.0, 2.0, 1.0]
+    zones = np.select(conditions, choices, default=np.nan).astype(np.float32)
+    zones[mask | np.isnan(elev)] = np.nan
+    return zones
+
+
 def _make_annular_kernel(inner_radius: int, outer_radius: int) -> np.ndarray:
     """Boolean annular kernel: True where inner_r <= dist <= outer_r."""
     y, x = np.ogrid[

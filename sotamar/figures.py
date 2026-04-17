@@ -6,9 +6,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
 from pathlib import Path
 
 from sotamar.profile import DIVE_THRESHOLDS
+
+ZONE_COLORS = ["#a6cee3", "#1f78b4", "#08519c", "#000000"]
+ZONE_LABELS = [
+    "Zone 1: OWD (0 to \u221218 m)",
+    "Zone 2: AOWD (\u221218 to \u221230 m)",
+    "Zone 3: Deep / rec limit (\u221230 to \u221240 m)",
+    "Zone 4: Technical (< \u221240 m)",
+]
 
 plt.rcParams.update({
     "figure.facecolor": "white",
@@ -27,44 +38,44 @@ def plot_terrain_analysis(
     bpi_fine: np.ndarray,
     bpi_broad: np.ndarray,
     vrm: np.ndarray,
+    depth_zones: np.ndarray,
     bounds: tuple[float, float, float, float],
     site_name: str,
     output_dir: Path,
 ) -> None:
-    """Generate 5-panel terrain analysis figure (2x3 grid). Saves PNG + PDF."""
+    """Generate 6-panel terrain analysis figure (2x3 grid). Saves PNG + PDF."""
     extent = _make_extent(bounds)
 
+    # (title, array, cmap, vmax_mode): "auto" | "symmetric" | "p99"
     datasets = [
-        ("Depth (m)", elevation, "viridis", False),
-        ("Slope (degrees)", slope, "YlOrRd", False),
-        ("Fine BPI (r=3\u20135 m)", bpi_fine, "RdBu_r", True),
-        ("Broad BPI (r=25\u201350 m)", bpi_broad, "RdBu_r", True),
-        ("VRM (3\u00d73)", vrm, "inferno", False),
+        ("Depth (m)",              elevation, "viridis", "auto"),
+        ("Slope (degrees)",        slope,     "YlOrRd",  "auto"),
+        ("Fine BPI (r=3\u20135 m)",    bpi_fine,  "RdBu_r",  "symmetric"),
+        ("Broad BPI (r=25\u201350 m)", bpi_broad, "RdBu_r",  "symmetric"),
+        ("VRM (3\u00d73)",             vrm,       "inferno", "p99"),
     ]
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 11))
     axes_flat = axes.flatten()
 
-    for idx, (title, arr, cmap, symmetric) in enumerate(datasets):
+    for idx, (title, arr, cmap, mode) in enumerate(datasets):
         ax = axes_flat[idx]
-        if symmetric:
-            vmax = np.nanpercentile(np.abs(arr), 99)
-            im = ax.imshow(
-                arr, cmap=cmap, extent=extent, origin="upper",
-                aspect="equal", vmin=-vmax, vmax=vmax,
-            )
+        kw = dict(cmap=cmap, extent=extent, origin="upper", aspect="equal")
+        if mode == "symmetric":
+            vmax = float(np.nanpercentile(np.abs(arr), 99))
+            im = ax.imshow(arr, vmin=-vmax, vmax=vmax, **kw)
+        elif mode == "p99":
+            vmax = float(np.nanpercentile(arr, 99))
+            im = ax.imshow(arr, vmin=0.0, vmax=vmax, **kw)
         else:
-            im = ax.imshow(
-                arr, cmap=cmap, extent=extent, origin="upper",
-                aspect="equal",
-            )
+            im = ax.imshow(arr, **kw)
         plt.colorbar(im, ax=ax, shrink=0.8)
         ax.set_title(title)
         ax.set_xlabel("Easting (m)")
         ax.set_ylabel("Northing (m)")
+        _apply_axis_ticks(ax)
 
-    # Hide empty 6th subplot
-    axes_flat[5].set_visible(False)
+    _plot_depth_zones_panel(axes_flat[5], depth_zones, extent)
 
     fig.suptitle(
         f"Bathymetric Terrain Analysis \u2014 {site_name}",
@@ -73,6 +84,31 @@ def plot_terrain_analysis(
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     _save_figure(fig, "terrain_analysis", output_dir)
     plt.close(fig)
+
+
+def _plot_depth_zones_panel(ax, depth_zones: np.ndarray, extent: list[float]) -> None:
+    """Render the discrete depth-zones panel with legend."""
+    cmap = ListedColormap(ZONE_COLORS)
+    norm = BoundaryNorm([0.5, 1.5, 2.5, 3.5, 4.5], cmap.N)
+    ax.imshow(
+        depth_zones, cmap=cmap, norm=norm, extent=extent,
+        origin="upper", aspect="equal",
+    )
+    ax.set_title("Depth zones")
+    ax.set_xlabel("Easting (m)")
+    ax.set_ylabel("Northing (m)")
+    handles = [Patch(color=c, label=lbl) for c, lbl in zip(ZONE_COLORS, ZONE_LABELS)]
+    ax.legend(handles=handles, loc="lower left", fontsize=7, framealpha=0.9)
+    _apply_axis_ticks(ax)
+
+
+def _apply_axis_ticks(ax) -> None:
+    """Limit tick count and rotate easting labels to prevent overlap."""
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.tick_params(axis="x", rotation=30)
+    for lbl in ax.get_xticklabels():
+        lbl.set_horizontalalignment("right")
 
 
 def plot_depth_profile(
@@ -87,7 +123,7 @@ def plot_depth_profile(
     ax.plot(distances, depths, "steelblue", linewidth=1.5)
     ax.fill_between(
         distances, depths, 0, alpha=0.15, color="steelblue",
-        where=~np.isnan(depths),
+        where=(~np.isnan(depths)) & (depths <= 0),
     )
     ax.axhline(0, color="black", linewidth=0.5)
 

@@ -11,6 +11,7 @@ import rasterio
 
 from sotamar.io import (
     NODATA_GEOTIFF,
+    compute_depth_zone_pcts,
     compute_stats,
     find_cog,
     read_bathymetry_window,
@@ -230,3 +231,42 @@ class TestSaveStats:
         path = tmp_path / "deep" / "nested" / "stats.json"
         save_stats(stats, path)
         assert path.exists()
+
+
+# -- compute_depth_zone_pcts --------------------------------------------------
+
+class TestComputeDepthZonePcts:
+    def test_known_distribution(self):
+        """A 10-pixel array with 4 zone-1, 3 zone-2, 2 zone-3, 1 zone-4."""
+        zones = np.array([1, 1, 1, 1, 2, 2, 2, 3, 3, 4], dtype=np.float32)
+        result = compute_depth_zone_pcts(zones)
+        assert result["owd_pct"] == 40.0
+        assert result["aowd_pct"] == 30.0
+        assert result["deep_pct"] == 20.0
+        assert result["tech_pct"] == 10.0
+
+    def test_nan_excluded_from_denominator(self):
+        """NaN pixels should not be counted in total."""
+        zones = np.array([1.0, 1.0, np.nan, np.nan, 2.0], dtype=np.float32)
+        result = compute_depth_zone_pcts(zones)
+        # 2/3 are zone-1, 1/3 is zone-2
+        assert result["owd_pct"] == round(2 / 3 * 100, 2)
+        assert result["aowd_pct"] == round(1 / 3 * 100, 2)
+
+    def test_all_nan_returns_none_values(self):
+        zones = np.full((3, 3), np.nan, dtype=np.float32)
+        result = compute_depth_zone_pcts(zones)
+        for key in ("owd_pct", "aowd_pct", "deep_pct", "tech_pct"):
+            assert result[key] is None
+
+    def test_percentages_sum_to_100(self):
+        rng = np.random.default_rng(0)
+        zones = rng.integers(1, 5, size=200).astype(np.float32)
+        result = compute_depth_zone_pcts(zones)
+        total = sum(result.values())
+        assert total == pytest.approx(100.0, abs=0.05)
+
+    def test_returns_all_keys(self):
+        zones = np.array([3.0], dtype=np.float32)
+        result = compute_depth_zone_pcts(zones)
+        assert set(result.keys()) == {"owd_pct", "aowd_pct", "deep_pct", "tech_pct"}
