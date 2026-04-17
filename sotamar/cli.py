@@ -204,3 +204,7 @@ def check_coords():
     click.echo(
         "\nDistances > 2000 m are flagged (!!!) — coordinates may need correction."
     )
+
+
+if __name__ == "__main__":
+    cli()
