@@ -123,6 +123,45 @@ def synthetic_cog(tmp_path, flat_surface):
     return path
 
 
+# -- DB fixtures (skip cleanly when PostGIS is not running) -------------------
+
+@pytest.fixture(scope="session")
+def db_url():
+    """Return the PostGIS URL — env var wins, default points at compose."""
+    import os
+    return os.environ.get(
+        "SOTAMAR_DB_URL",
+        "postgresql+psycopg://sotamar:sotamar@localhost:5432/sotamar",
+    )
+
+
+@pytest.fixture(scope="session")
+def db_engine(db_url):
+    """Yield a SQLAlchemy engine; skip the test if PostGIS is unreachable."""
+    import sqlalchemy
+    engine = sqlalchemy.create_engine(db_url, future=True)
+    try:
+        with engine.connect() as c:
+            c.execute(sqlalchemy.text("SELECT 1"))
+            c.execute(sqlalchemy.text("SELECT PostGIS_Version()"))
+    except Exception as exc:
+        pytest.skip(f"PostGIS not reachable at {db_url}: {exc}")
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def clean_db(db_engine):
+    """Truncate the three catalogue tables before each integration test."""
+    import sqlalchemy
+    with db_engine.begin() as c:
+        c.execute(sqlalchemy.text(
+            "TRUNCATE site_rasters, site_terrain_stats, dive_sites "
+            "RESTART IDENTITY CASCADE"
+        ))
+    yield db_engine
+
+
 @pytest.fixture
 def varied_cog(tmp_path, peaked_surface):
     """Write a synthetic COG with terrain variation for integration tests."""

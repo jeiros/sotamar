@@ -86,8 +86,9 @@ class TestListCommand:
         assert "Region" in result.output
 
     def test_shows_count(self, runner):
+        from sotamar.sites import all_sites
         result = runner.invoke(cli, ["list"])
-        assert "6 sites registered" in result.output
+        assert f"{len(all_sites())} sites registered" in result.output
 
 
 # -- analyze command: argument validation -------------------------------------

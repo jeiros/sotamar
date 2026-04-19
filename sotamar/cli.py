@@ -220,5 +220,104 @@ def check_coords():
     )
 
 
+@cli.command("load-db")
+@click.option(
+    "--db-url", envvar="SOTAMAR_DB_URL", default=None,
+    help="PostgreSQL URL (default from SOTAMAR_DB_URL or localhost:5432/sotamar).",
+)
+@click.option(
+    "--sites-dir", type=click.Path(file_okay=False), default="data/sites",
+    help="Per-site output directory (default: data/sites).",
+)
+@click.option(
+    "--only", "slugs", multiple=True,
+    help="Restrict to specific slugs (repeatable).",
+)
+def load_db(db_url, sites_dir, slugs):
+    """Load the site registry, stats.json, and rasters into PostGIS."""
+    from sotamar import db as dbmod
+
+    engine = dbmod.get_engine(db_url)
+    slug_filter = list(slugs) if slugs else None
+    summary = dbmod.load_all_sites(
+        engine, sites_dir=Path(sites_dir), slugs=slug_filter,
+    )
+
+    click.echo(f"\nLoaded {summary.sites} sites, {summary.stats} stats rows, "
+               f"{summary.rasters} raster rows.")
+    if summary.sites_without_zones:
+        click.echo(
+            f"  note: {len(summary.sites_without_zones)} site(s) loaded without "
+            f"depth_zones — stale stats.json. Re-run `analyze --all`:"
+        )
+        for slug in summary.sites_without_zones:
+            click.echo(f"    - {slug}")
+    if summary.skipped:
+        click.echo(f"\n  skipped {len(summary.skipped)} site(s):")
+        for slug, reason in summary.skipped:
+            click.echo(f"    - {slug}: {reason}")
+        if not slugs:
+            raise SystemExit(1)
+
+
+@cli.command("export-geojson")
+@click.option(
+    "--db-url", envvar="SOTAMAR_DB_URL", default=None,
+    help="PostgreSQL URL (default from SOTAMAR_DB_URL or localhost:5432/sotamar).",
+)
+@click.option(
+    "--output", "-o", type=click.Path(dir_okay=False),
+    default="data/catalog/sites.geojson",
+    help="Output path (default: data/catalog/sites.geojson).",
+)
+@click.option(
+    "--from-files", is_flag=True,
+    help="Bypass DB and build from sites.py + stats.json directly.",
+)
+@click.option("--pretty/--compact", default=True)
+def export_geojson(db_url, output, from_files, pretty):
+    """Export all dive sites as a GeoJSON FeatureCollection (WGS84)."""
+    from sotamar import db as dbmod
+
+    rows = None
+    if not from_files:
+        try:
+            engine = dbmod.get_engine(db_url)
+            with engine.connect() as conn:
+                conn.execute(sqlalchemy_text("SELECT 1"))
+            rows = dbmod.fetch_sites_with_stats(engine)
+            click.echo(f"Read {len(rows)} sites from database.")
+        except Exception as exc:
+            click.echo(f"Database unreachable ({exc}); falling back to files.")
+            rows = None
+
+    if rows is None:
+        rows = dbmod.site_rows_from_files()
+        click.echo(f"Read {len(rows)} sites from file registry.")
+
+    fc = dbmod.site_rows_to_geojson(rows)
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    indent = 2 if pretty else None
+    out_path.write_text(json.dumps(fc, indent=indent, default=_json_default))
+    click.echo(f"Wrote {len(rows)} features to {out_path}")
+
+
+def _json_default(obj):
+    """JSON fallback for decimal/datetime-like values coming back from pg."""
+    from decimal import Decimal
+    if isinstance(obj, Decimal):
+        return float(obj)
+    try:
+        return obj.isoformat()
+    except AttributeError:
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON-serialisable")
+
+
+def sqlalchemy_text(sql):
+    import sqlalchemy
+    return sqlalchemy.text(sql)
+
+
 if __name__ == "__main__":
     cli()

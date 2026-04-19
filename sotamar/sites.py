@@ -17,6 +17,8 @@ class Site:
     character: str
     half_size: int = 1000
     transect: tuple[tuple[float, float], tuple[float, float]] | None = None
+    description: str | None = None
+    max_depth: float | None = None
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -103,6 +105,134 @@ _register(Site(
     northing=4547200,
     region="Costa Daurada",
     character="Rocky cape, moderate relief",
+))
+
+# -- Session 2 additions: expanded catalogue ---------------------------------
+# Coordinates below are approximate — cross-check with check-coords and
+# correct any that drift more than a few hundred metres from expected.
+
+_register(Site(
+    slug="cap_de_creus",
+    name="Cap de Creus",
+    easting=525800,
+    northing=4688900,
+    region="Costa Brava",
+    character="Exposed granite headland, steep walls",
+))
+
+_register(Site(
+    slug="massa_dor",
+    name="Massa d'Or",
+    easting=527100,
+    northing=4687200,
+    region="Costa Brava",
+    character="Offshore pinnacle, high relief",
+))
+
+_register(Site(
+    slug="el_gat",
+    name="El Gat",
+    easting=524300,
+    northing=4690100,
+    region="Costa Brava",
+    character="Small rocky islet, vertical relief",
+))
+
+_register(Site(
+    slug="els_farallons",
+    name="Els Farallons",
+    easting=525500,
+    northing=4686600,
+    region="Costa Brava",
+    character="Twin rocks, swim-throughs",
+))
+
+_register(Site(
+    slug="lescala_empuries",
+    name="L'Escala – Empúries",
+    easting=513000,
+    northing=4663400,
+    region="Costa Brava",
+    character="Sandy shelf near Greco-Roman ruins",
+))
+
+_register(Site(
+    slug="ullastres",
+    name="Ullastres",
+    easting=508300,
+    northing=4640900,
+    region="Costa Brava",
+    character="Three pinnacles off Llafranc",
+    description=(
+        "Three submerged pinnacles (Ullastre I, II, III) at roughly 15–50 m "
+        "depth off Llafranc. One of the best-known recreational dive sites "
+        "on the Costa Brava."
+    ),
+    max_depth=50.0,
+))
+
+_register(Site(
+    slug="els_canyers",
+    name="Els Canyers",
+    easting=510800,
+    northing=4637200,
+    region="Costa Brava",
+    character="Rocky coastal drop-off near Palamós",
+))
+
+_register(Site(
+    slug="cap_de_planes",
+    name="Cap de Planes",
+    easting=513000,
+    northing=4636000,
+    region="Costa Brava",
+    character="Rocky cape near Palamós, moderate relief",
+))
+
+_register(Site(
+    slug="garraf_falconera",
+    name="La Falconera",
+    easting=408500,
+    northing=4567700,
+    region="Costa del Garraf",
+    character="Karstic cliffs with freshwater seeps",
+    description=(
+        "Submerged karstic spring in the Garraf massif where freshwater "
+        "discharges into the Mediterranean through underwater cave systems."
+    ),
+))
+
+_register(Site(
+    slug="illa_de_la_plana",
+    name="Illa de la Plana",
+    easting=411900,
+    northing=4562800,
+    region="Costa del Garraf",
+    character="Small rocky islet, moderate relief",
+))
+
+_register(Site(
+    slug="el_biotop_torredembarra",
+    name="El Biotop (Torredembarra)",
+    easting=371800,
+    northing=4552400,
+    region="Costa Daurada",
+    character="Artificial reef; bathymetry-gap case study",
+    description=(
+        "Artificial reef module near Torredembarra at approximately "
+        "41.130° N, 1.430° E. Used as a case study of structures absent "
+        "from the ICGC v2r1 bathymetry coverage."
+    ),
+    max_depth=20.0,
+))
+
+_register(Site(
+    slug="lametlla_de_mar",
+    name="L'Ametlla de Mar",
+    easting=306700,
+    northing=4531800,
+    region="Costa Daurada",
+    character="Rocky coastline with caves, near Ebre delta",
 ))
 
 

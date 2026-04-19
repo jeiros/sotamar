@@ -87,15 +87,17 @@ class TestSiteDataclass:
 # -- Registry -----------------------------------------------------------------
 
 class TestRegistry:
-    def test_six_sites_registered(self):
-        assert len(list_sites()) == 6
-
-    def test_all_slugs_present(self):
-        expected = {
+    def test_original_six_sites_registered(self):
+        original = {
             "roses", "illes_medes", "illes_formigues",
             "tossa_de_mar", "costa_del_garraf", "cap_de_salou",
         }
-        assert set(list_sites()) == expected
+        assert original.issubset(set(list_sites()))
+
+    def test_catalogue_has_expected_regions(self):
+        from sotamar.sites import all_sites
+        regions = {s.region for s in all_sites()}
+        assert regions == {"Costa Brava", "Costa del Garraf", "Costa Daurada"}
 
     def test_get_site_returns_correct_type(self):
         site = get_site("illes_medes")

@@ -1,0 +1,27 @@
+# PostGIS for SotaMar — local TFG development.
+# Schema in ./sql/ is auto-applied on first cluster init only.
+# To re-apply after edits (idempotent):
+#   docker compose exec postgis psql -U sotamar -d sotamar \
+#       -f /docker-entrypoint-initdb.d/schema.sql
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: sotamar-postgis
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: sotamar
+      POSTGRES_USER: sotamar
+      POSTGRES_PASSWORD: sotamar
+    volumes:
+      - sotamar_pgdata:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sotamar -d sotamar"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  sotamar_pgdata:
