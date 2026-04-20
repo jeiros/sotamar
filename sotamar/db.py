@@ -12,7 +12,6 @@ import rasterio
 from geoalchemy2 import Geometry
 from pyproj import Transformer
 from sqlalchemy import (
-    CheckConstraint,
     Column,
     Engine,
     ForeignKey,
@@ -103,7 +102,6 @@ site_rasters = Table(
            Geometry("POLYGON", srid=25831, spatial_index=False),
            nullable=False),
     UniqueConstraint("site_id", "layer_name"),
-    CheckConstraint(f"layer_name IN {LAYER_NAMES!r}"),
 )
 
 
