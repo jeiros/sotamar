@@ -68,7 +68,7 @@ class TestLoadDbCli:
         result = runner.invoke(
             cli,
             ["load-db", "--sites-dir", str(tmp_path),
-             "--db-url", str(clean_db.url)],
+             "--db-url", clean_db.url.render_as_string(hide_password=False)],
         )
         assert result.exit_code == 0, result.output
         assert "Loaded" in result.output
