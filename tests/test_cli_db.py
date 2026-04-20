@@ -10,6 +10,23 @@ from click.testing import CliRunner
 from sotamar.cli import cli
 
 
+class TestExportGeojsonDbUnreachable:
+    """Without --from-files, a DB error must exit non-zero with a hint."""
+
+    def test_unreachable_db_fails_loudly(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["export-geojson", "-o", str(tmp_path / "out.geojson"),
+             "--db-url", "postgresql+psycopg://nope:nope@127.0.0.1:1/nodb"],
+        )
+        assert result.exit_code != 0
+        assert "could not read from PostGIS" in result.output
+        assert "--from-files" in result.output
+        assert not (tmp_path / "out.geojson").exists()
+
+
 class TestExportGeojsonFromFiles:
     """The --from-files path must work without a database."""
 

@@ -279,21 +279,19 @@ def export_geojson(db_url, output, from_files, pretty):
     """Export all dive sites as a GeoJSON FeatureCollection (WGS84)."""
     from sotamar import db as dbmod
 
-    rows = None
-    if not from_files:
-        try:
-            engine = dbmod.get_engine(db_url)
-            with engine.connect() as conn:
-                conn.execute(sqlalchemy_text("SELECT 1"))
-            rows = dbmod.fetch_sites_with_stats(engine)
-            click.echo(f"Read {len(rows)} sites from database.")
-        except Exception as exc:
-            click.echo(f"Database unreachable ({exc}); falling back to files.")
-            rows = None
-
-    if rows is None:
+    if from_files:
         rows = dbmod.site_rows_from_files()
         click.echo(f"Read {len(rows)} sites from file registry.")
+    else:
+        try:
+            engine = dbmod.get_engine(db_url)
+            rows = dbmod.fetch_sites_with_stats(engine)
+        except Exception as exc:
+            raise click.ClickException(
+                f"could not read from PostGIS: {exc}\n"
+                "Hint: pass --from-files to bypass the database."
+            )
+        click.echo(f"Read {len(rows)} sites from database.")
 
     fc = dbmod.site_rows_to_geojson(rows)
     out_path = Path(output)
@@ -312,11 +310,6 @@ def _json_default(obj):
         return obj.isoformat()
     except AttributeError:
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON-serialisable")
-
-
-def sqlalchemy_text(sql):
-    import sqlalchemy
-    return sqlalchemy.text(sql)
 
 
 if __name__ == "__main__":
