@@ -16,3 +16,8 @@ data/sites/
 .idea/
 .vscode/
 *.swp
+
+# Session/AI scaffolding — never committed
+SESSION*.md
+CLAUDE.md
+.claude/
