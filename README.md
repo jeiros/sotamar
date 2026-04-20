@@ -51,6 +51,10 @@ Schema is versioned in `sql/schema.sql` (three tables: `dive_sites`,
 `site_terrain_stats`, `site_rasters`). `geom_utm` (EPSG:25831) is the
 source of truth; `geom` (EPSG:4326) is trigger-derived.
 
+`site_rasters.file_path` stores a path relative to the sites directory
+(e.g. `illes_medes/slope.tif`) — join with the directory passed to
+`--sites-dir` (default `data/sites`) to resolve it.
+
 **Schema re-apply** after edits (Docker only runs init scripts on empty
 volumes):
 ```bash

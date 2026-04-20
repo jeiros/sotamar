@@ -215,7 +215,7 @@ def upsert_site_rasters(conn, site_id: int, site_dir: Path) -> list[str]:
         stmt = pg_insert(site_rasters).values(
             site_id=site_id,
             layer_name=layer,
-            file_path=str(tif),
+            file_path=f"{site_dir.name}/{tif.name}",
             bbox=func.ST_GeomFromText(bbox_wkt, 25831),
         )
         stmt = stmt.on_conflict_do_update(
@@ -392,7 +392,10 @@ def site_rows_from_files(sites_dir: Path = Path("data/sites")) -> list[SiteRow]:
             for layer in LAYER_NAMES:
                 tif = sites_dir / site.slug / f"{layer}.tif"
                 if tif.exists():
-                    rasters.append({"layer": layer, "path": str(tif)})
+                    rasters.append({
+                        "layer": layer,
+                        "path": f"{site.slug}/{tif.name}",
+                    })
 
         lon, lat = _utm_to_wgs84.transform(site.easting, site.northing)
         results.append(SiteRow(
