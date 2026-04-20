@@ -148,7 +148,6 @@ class TestAnalyzePipeline:
         assert "depth" in stats
         assert "slope" in stats
         assert "vrm" in stats
-        assert stats["slug"] == "test_peak"
 
         # Figures
         for fig_name in ("terrain_analysis", "depth_profile"):

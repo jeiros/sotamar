@@ -160,13 +160,6 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
         mask,
     )
     stats["depth_zones"] = compute_depth_zone_pcts(depth_zones)
-    stats["slug"] = site.slug
-    stats["name"] = site.name
-    stats["easting"] = site.easting
-    stats["northing"] = site.northing
-    stats["half_size"] = site.half_size
-    stats["region"] = site.region
-    stats["character"] = site.character
     save_stats(stats, output_dir / "stats.json")
 
     # 6. Extract depth profile
