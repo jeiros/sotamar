@@ -226,11 +226,19 @@ def build_site_deck(
     native negative depths so the seabed extrudes downward from the
     (implicit) sea surface — a proper bathymetric viewpoint.
     """
+    # deck.gl 9's ColumnLayer is unreliable with negative elevations (face
+    # normals flip, columns become invisible). Use positive heights equal to
+    # |depth| × exaggeration: columns rise from the implicit seabed datum
+    # (z=0, rendered as the dark ocean floor) to the sea surface direction.
+    # Semantics: "taller column = deeper water". Legend in the HTML makes
+    # the mapping explicit.
+    for r in records:
+        r["height_m"] = round(abs(r["depth"]), 2)
     column_layer = pdk.Layer(
         "ColumnLayer",
         data=records,
         get_position=["lon", "lat"],
-        get_elevation="depth",  # depth is negative → columns extrude downward
+        get_elevation="height_m",
         elevation_scale=VERTICAL_EXAGGERATION,
         radius=cell_metres / 2,
         get_fill_color="color",
@@ -244,7 +252,7 @@ def build_site_deck(
         data=[{"lon": site_row.lon, "lat": site_row.lat, "text": site_row.name}],
         get_position=["lon", "lat"],
         get_text="text",
-        get_size=18,
+        get_size=22,
         get_color=[240, 240, 240],
         get_alignment_baseline="'bottom'",
         billboard=True,
@@ -253,7 +261,7 @@ def build_site_deck(
     view = pdk.ViewState(
         longitude=site_row.lon,
         latitude=site_row.lat,
-        zoom=14,
+        zoom=13,
         pitch=55,
         bearing=0,
     )
@@ -262,8 +270,8 @@ def build_site_deck(
         "html": (
             "<b>Depth:</b> {depth} m<br/>"
             "<b>{zone_label}</b><br/>"
-            f"<i style='color:#666;'>×{VERTICAL_EXAGGERATION:g} vertical "
-            "exaggeration</i>"
+            f"<i style='color:#666;'>Taller column = deeper "
+            f"(×{VERTICAL_EXAGGERATION:g} vertical exaggeration)</i>"
         ),
         "style": {"backgroundColor": "white", "color": "#222",
                   "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
@@ -279,19 +287,50 @@ def build_site_deck(
 
 
 # Injected into per-site HTML so the canvas has an ocean-blue background
-# instead of deck.gl's default black. #0a3d62 reads as deep Mediterranean.
-_SITE_BACKGROUND_STYLE = """
+# (no basemap) and a legend explaining the depth-zone colours + the
+# "taller = deeper" convention. #0a3d62 reads as deep Mediterranean.
+_SITE_STYLE_AND_LEGEND = """
 <style>
   body, #deck-container { background: #0a3d62 !important; }
   #deck-container canvas { background: #0a3d62 !important; }
+  #sotamar-legend {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    background: rgba(255,255,255,0.92);
+    padding: 10px 14px; border-radius: 6px;
+    font: 12px system-ui, sans-serif; color: #222;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  #sotamar-legend h4 { margin: 0 0 6px 0; font-size: 13px; }
+  #sotamar-legend .row { display: flex; align-items: center; margin: 2px 0; }
+  #sotamar-legend .sw {
+    display: inline-block; width: 14px; height: 14px;
+    margin-right: 8px; border: 1px solid #555;
+  }
+  #sotamar-legend .note {
+    margin-top: 8px; font-style: italic; color: #555; font-size: 11px;
+    max-width: 220px;
+  }
 </style>
+"""
+
+_SITE_LEGEND_BODY = """
+<div id="sotamar-legend">
+  <h4>Dive zone (by depth)</h4>
+  <div class="row"><span class="sw" style="background:#a6cee3;"></span>Zone 1 — OWD (0 to −18 m)</div>
+  <div class="row"><span class="sw" style="background:#1f78b4;"></span>Zone 2 — AOWD (−18 to −30 m)</div>
+  <div class="row"><span class="sw" style="background:#08519c;"></span>Zone 3 — Deep (−30 to −40 m)</div>
+  <div class="row"><span class="sw" style="background:#000000;"></span>Zone 4 — Technical (&lt; −40 m)</div>
+  <div class="note">Column height = depth below sea level, ×__VE__ vertical exaggeration. Taller column = deeper water. Emerged land is not drawn.</div>
+</div>
 """
 
 
 def _inject_ocean_background(html_path: Path) -> None:
-    """Give per-site HTML an ocean-blue canvas background."""
+    """Give per-site HTML an ocean-blue canvas background and a legend."""
     html = html_path.read_text()
-    html = html.replace("</head>", f"{_SITE_BACKGROUND_STYLE}</head>")
+    legend = _SITE_LEGEND_BODY.replace("__VE__", f"{VERTICAL_EXAGGERATION:g}")
+    html = html.replace("</head>", f"{_SITE_STYLE_AND_LEGEND}</head>")
+    html = html.replace("<body>", f"<body>{legend}")
     html_path.write_text(html)
 
 
