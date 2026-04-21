@@ -454,7 +454,7 @@ _LEGEND_BODY = f"""
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[1]};"></span>Zone 2 — AOWD (−18 to −30 m)</div>
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[2]};"></span>Zone 3 — Deep (−30 to −40 m)</div>
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[3]};"></span>Zone 4 — Technical (&lt; −40 m)</div>
-  <div class="note">Column height = rise above the deepest point in the window, ×{VERTICAL_EXAGGERATION:g} vertical exaggeration. Taller = shallower reef; flat floor = deepest parts. Emerged land is not drawn.</div>
+  <div class="note">Column height = rise above the deepest point in the window, ×{VERTICAL_EXAGGERATION:g} vertical exaggeration. Taller = shallower reef; flat floor = deepest parts. Emerged land (elevation &gt; 0 m) is excluded from the analysis.</div>
 </div>
 """
 
@@ -483,7 +483,8 @@ def _render_stats_table(stats: dict) -> str:
         ("Dive zones", "OWD / AOWD / Deep / Tech",
          " / ".join(_fmt(zones.get(k), " %", 1)
                     for k in ("owd_pct", "aowd_pct", "deep_pct", "tech_pct"))),
-        ("NoData", "", _fmt(stats.get("nodata_pct"), " %", 2)),
+        ("NoData (survey gap)", "", _fmt(stats.get("nodata_pct"), " %", 2)),
+        ("Emerged (above sea)", "", _fmt(stats.get("emerged_pct"), " %", 2)),
     ]
     html = ['<table class="stats">']
     for name, detail, value in rows:
@@ -609,7 +610,7 @@ def write_site_pages(
 
 def write_viewer(
     rows: list[SiteRow], output_dir: Path, sites_dir: Path,
-    grid_size: int = 50,
+    grid_size: int = 100,
 ) -> ViewerSummary:
     """Write the overview plus a multi-metric per-site page tree."""
     # Wipe previous output so nested vs flat layouts don't collide.

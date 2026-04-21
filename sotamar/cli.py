@@ -99,13 +99,32 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
 
     # 1. Read bathymetry
     click.echo("  Reading bathymetry window...")
-    elevation, mask, profile = read_bathymetry_window(site.bounds, cog_path)
-    click.echo(f"  Shape: {elevation.shape}, NoData: {mask.sum() / mask.size * 100:.1f}%")
+    elevation, nodata_mask, profile = read_bathymetry_window(site.bounds, cog_path)
 
-    # 2. Check data sufficiency
-    nodata_pct = mask.sum() / mask.size * 100
-    if nodata_pct > 95:
-        click.echo(f"  SKIPPING: {nodata_pct:.0f}% nodata — insufficient data.")
+    # 2. Clip emerged terrain (above sea level). This is a dive-site
+    # analysis; subaerial topography isn't informative for dive planning
+    # and would skew slope/BPI/VRM statistics. Emerged pixels become NaN
+    # and are folded into the "not analysed" mask.
+    import numpy as _np
+    emerged_mask = (~nodata_mask) & (elevation > 0)
+    emerged_pct = round(float(emerged_mask.sum() / emerged_mask.size * 100), 2)
+    nodata_pct_true = round(
+        float(nodata_mask.sum() / nodata_mask.size * 100), 2,
+    )
+    elevation[emerged_mask] = _np.nan
+    mask = nodata_mask | emerged_mask
+    click.echo(
+        f"  Shape: {elevation.shape}, NoData: {nodata_pct_true:.1f}%, "
+        f"Emerged: {emerged_pct:.1f}%"
+    )
+
+    # 3. Check data sufficiency
+    not_analysed_pct = mask.sum() / mask.size * 100
+    if not_analysed_pct > 95:
+        click.echo(
+            f"  SKIPPING: only {100 - not_analysed_pct:.0f}% submerged "
+            f"— insufficient data."
+        )
         return
 
     # 3. Compute terrain metrics
@@ -160,6 +179,9 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
         mask,
     )
     stats["depth_zones"] = compute_depth_zone_pcts(depth_zones)
+    # Override mask-derived nodata_pct with the split (true gap vs emerged).
+    stats["nodata_pct"] = nodata_pct_true
+    stats["emerged_pct"] = emerged_pct
     save_stats(stats, output_dir / "stats.json")
 
     # 6. Extract depth profile
@@ -313,8 +335,8 @@ def export_geojson(db_url, output, from_files, pretty):
     help="Bypass DB; read site registry + stats.json directly.",
 )
 @click.option(
-    "--grid-size", type=int, default=50,
-    help="Downsample grid per site (default 50×50 ≈ 40 m cells).",
+    "--grid-size", type=int, default=100,
+    help="Downsample grid per site (default 100×100 ≈ 20 m cells).",
 )
 def viewer(db_url, sites_dir, output, from_files, grid_size):
     """Generate a static HTML viewer: overview map + per-site 3D seabed."""
