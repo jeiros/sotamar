@@ -72,7 +72,7 @@ class MetricSpec:
 
 
 METRICS: tuple[MetricSpec, ...] = (
-    MetricSpec("depth",     "Depth",     "bathymetry.tif", "viridis_r", "depth",         " m", 2, "depth"),
+    MetricSpec("depth",     "Depth",     "bathymetry.tif", "viridis",   "depth",         " m", 2, "depth"),
     MetricSpec("zone",      "Dive zone", None,             "",          "zone",          "",   0, "zone_label"),
     MetricSpec("slope",     "Slope",     "slope.tif",      "YlOrRd",    "linear_p99",    "°",  1, "slope"),
     MetricSpec("bpi_fine",  "Fine BPI",  "bpi_fine.tif",   "RdBu_r",    "symmetric_p99", "",   2, "bpi_fine"),
