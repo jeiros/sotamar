@@ -227,13 +227,15 @@ def build_site_deck(
     (implicit) sea surface — a proper bathymetric viewpoint.
     """
     # deck.gl 9's ColumnLayer is unreliable with negative elevations (face
-    # normals flip, columns become invisible). Use positive heights equal to
-    # |depth| × exaggeration: columns rise from the implicit seabed datum
-    # (z=0, rendered as the dark ocean floor) to the sea surface direction.
-    # Semantics: "taller column = deeper water". Legend in the HTML makes
-    # the mapping explicit.
+    # normals flip, columns become invisible). Use positive heights, but
+    # measure them as "how much the seabed rises above the deepest point in
+    # the window": height = max|depth| − |depth|. Shallow reef crests become
+    # tall columns; the deepest flat areas sit flush with the canvas. Real
+    # terrain topology is preserved — only the datum is flipped (anchored to
+    # the basement, not the sea surface).
+    max_abs = max(abs(r["depth"]) for r in records) if records else 0.0
     for r in records:
-        r["height_m"] = round(abs(r["depth"]), 2)
+        r["height_m"] = round(max_abs - abs(r["depth"]), 2)
     column_layer = pdk.Layer(
         "ColumnLayer",
         data=records,
@@ -270,7 +272,7 @@ def build_site_deck(
         "html": (
             "<b>Depth:</b> {depth} m<br/>"
             "<b>{zone_label}</b><br/>"
-            f"<i style='color:#666;'>Taller column = deeper "
+            f"<i style='color:#666;'>Taller column = shallower reef "
             f"(×{VERTICAL_EXAGGERATION:g} vertical exaggeration)</i>"
         ),
         "style": {"backgroundColor": "white", "color": "#222",
@@ -320,7 +322,7 @@ _SITE_LEGEND_BODY = """
   <div class="row"><span class="sw" style="background:#1f78b4;"></span>Zone 2 — AOWD (−18 to −30 m)</div>
   <div class="row"><span class="sw" style="background:#08519c;"></span>Zone 3 — Deep (−30 to −40 m)</div>
   <div class="row"><span class="sw" style="background:#000000;"></span>Zone 4 — Technical (&lt; −40 m)</div>
-  <div class="note">Column height = depth below sea level, ×__VE__ vertical exaggeration. Taller column = deeper water. Emerged land is not drawn.</div>
+  <div class="note">Column height = rise above the deepest point in the window, ×__VE__ vertical exaggeration. Taller column = shallower reef; flat floor = the deepest parts. Emerged land is not drawn.</div>
 </div>
 """
 
