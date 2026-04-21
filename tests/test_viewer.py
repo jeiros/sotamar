@@ -207,6 +207,9 @@ class TestViewerCli:
         # pydeck's HTML embeds a deck.gl container — sanity-check the marker.
         idx_html = (output / "index.html").read_text()
         assert "deck-container" in idx_html or "DeckGL" in idx_html
+        # The click-to-navigate handler is appended after the pydeck template.
+        assert "deckInstance.setProps" in idx_html
+        assert "window.location.href" in idx_html
 
     def test_db_unreachable_fails_loudly(self, tmp_path, monkeypatch):
         """Without --from-files, a bad DB URL must exit with a hint."""

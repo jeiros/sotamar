@@ -108,7 +108,7 @@ def build_overview_deck(rows: list[SiteRow]) -> pdk.Deck:
             "Max depth: {max_depth} m<br/>"
             "OWD {owd_pct}% · AOWD {aowd_pct}%<br/>"
             "Deep {deep_pct}% · Tech {tech_pct}%<br/>"
-            "<a href='{href}' style='color:#1f78b4;'>View 3D →</a>"
+            "<span style='color:#1f78b4;'>Click marker to open 3D view →</span>"
         ),
         "style": {"backgroundColor": "white", "color": "#222",
                   "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
@@ -120,6 +120,34 @@ def build_overview_deck(rows: list[SiteRow]) -> pdk.Deck:
         map_style=BASEMAP_STYLE,
         tooltip=tooltip,
     )
+
+
+# Injected at the bottom of the overview HTML so clicking a marker opens
+# its per-site page. The pydeck template names the instance `deckInstance`
+# — stable across pydeck 0.9.x.
+_OVERVIEW_CLICK_SCRIPT = """
+<script>
+  deckInstance.setProps({
+    getCursor: ({isHovering}) => (isHovering ? 'pointer' : 'grab'),
+    onClick: (info) => {
+      if (info && info.object && info.object.href) {
+        window.location.href = info.object.href;
+      }
+    }
+  });
+</script>
+"""
+
+
+def _inject_overview_click_handler(html_path: Path) -> None:
+    """Post-process pydeck's static HTML to make markers click-navigate."""
+    html = html_path.read_text()
+    if "deckInstance" not in html:
+        raise RuntimeError(
+            f"{html_path}: pydeck template no longer exposes 'deckInstance'"
+        )
+    html = html.replace("</html>", f"{_OVERVIEW_CLICK_SCRIPT}</html>")
+    html_path.write_text(html)
 
 
 # -- Per-site 3D view ---------------------------------------------------------
@@ -254,6 +282,7 @@ def write_viewer(
     build_overview_deck(rows).to_html(
         str(overview_path), iframe_height=800, notebook_display=False,
     )
+    _inject_overview_click_handler(overview_path)
 
     sites_out: list[tuple[str, Path, int]] = []
     skipped: list[tuple[str, str]] = []
