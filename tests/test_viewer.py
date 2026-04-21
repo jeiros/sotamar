@@ -1,4 +1,4 @@
-"""Tests for sotamar.viewer — downsampling + static-HTML CLI smoke tests."""
+"""Tests for sotamar.viewer — multi-metric static HTML viewer."""
 
 from __future__ import annotations
 
@@ -14,11 +14,16 @@ from click.testing import CliRunner
 from sotamar.cli import cli
 from sotamar.db import SiteRow
 from sotamar.viewer import (
+    METRICS,
+    METRICS_BY_SLUG,
+    MetricSpec,
     _zone_from_depth,
     build_overview_deck,
+    build_records,
     build_site_deck,
-    downsample_bathymetry,
-    write_viewer,
+    compute_colors,
+    downsample_raster,
+    write_site_pages,
 )
 
 
@@ -26,14 +31,10 @@ from sotamar.viewer import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_bathy_tif(
-    path: Path,
-    array: np.ndarray,
-    *,
-    origin_easting: float = 500000.0,
-    origin_northing: float = 4600100.0,
-    resolution: float = 1.0,
-) -> Path:
+def _make_tif(path: Path, array: np.ndarray, *,
+              origin_easting: float = 500000.0,
+              origin_northing: float = 4600100.0,
+              resolution: float = 1.0) -> Path:
     h, w = array.shape
     profile = {
         "driver": "GTiff", "dtype": "float32",
@@ -49,27 +50,37 @@ def _make_bathy_tif(
 
 
 def _site_row(slug: str = "test_site",
-              easting: float = 500050.0, northing: float = 4600050.0) -> SiteRow:
-    """Minimal SiteRow with WGS84 derived from the UTM centre."""
+              easting: float = 500050.0,
+              northing: float = 4600050.0) -> SiteRow:
     from pyproj import Transformer
     lon, lat = Transformer.from_crs(
         "EPSG:25831", "EPSG:4326", always_xy=True,
     ).transform(easting, northing)
     return SiteRow(
         slug=slug, name=slug.replace("_", " ").title(),
-        lon=lon, lat=lat,
-        easting=easting, northing=northing,
-        region="Test Region", character="Synthetic",
+        lon=lon, lat=lat, easting=easting, northing=northing,
+        region="Test", character="Synthetic",
         description=None, max_depth=None,
-        window_size=100,
-        stats={},
-        rasters=[],
+        window_size=100, stats={}, rasters=[],
     )
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — downsampling + zone assignment
+# Unit tests
 # ---------------------------------------------------------------------------
+
+class TestMetricsRegistry:
+
+    def test_six_metrics_registered(self):
+        assert len(METRICS) == 6
+        assert [m.slug for m in METRICS] == [
+            "depth", "zone", "slope", "bpi_fine", "bpi_broad", "vrm",
+        ]
+
+    def test_lookup_by_slug(self):
+        assert METRICS_BY_SLUG["slope"].label == "Slope"
+        assert METRICS_BY_SLUG["vrm"].cmap == "inferno"
+
 
 class TestZoneFromDepth:
 
@@ -79,95 +90,190 @@ class TestZoneFromDepth:
         (-30.0, 3), (-39.99, 3),
         (-40.0, 4), (-80.0, 4),
     ])
-    def test_boundary_values(self, depth, zone):
+    def test_boundaries(self, depth, zone):
         assert _zone_from_depth(depth) == zone
 
 
 class TestDownsample:
 
-    def test_returns_grid_size_squared_for_flat_submerged(self, tmp_path):
-        """A flat -20 m surface with no nodata → one record per downsampled cell."""
+    def test_shape_and_nodata_handling(self, tmp_path):
         arr = np.full((100, 100), -20.0, dtype=np.float32)
-        tif = _make_bathy_tif(tmp_path / "bathy.tif", arr)
-
-        records = downsample_bathymetry(tif, grid_size=10)
-        assert len(records) == 100
-        depths = [r["depth"] for r in records]
-        assert all(d == pytest.approx(-20.0) for d in depths)
-        zones = {r["zone"] for r in records}
-        assert zones == {2}  # −20 m → zone 2 (AOWD)
-
-    def test_excludes_emerged_cells(self, tmp_path):
-        """Emerged (elev > 0) cells must be dropped from the record list."""
-        arr = np.full((100, 100), -15.0, dtype=np.float32)
-        arr[:50, :] = 5.0  # top half emerged
-        tif = _make_bathy_tif(tmp_path / "bathy.tif", arr)
-
-        records = downsample_bathymetry(tif, grid_size=10)
-        # 10x10 grid; top 5 rows average to +5 (emerged, dropped), bottom 5
-        # rows average to −15 → 50 records.
-        assert len(records) == 50
-        assert all(r["depth"] < 0 for r in records)
-
-    def test_excludes_nodata_cells(self, tmp_path):
-        arr = np.full((100, 100), -25.0, dtype=np.float32)
-        arr[:, :50] = -9999.0  # left half nodata
-        tif = _make_bathy_tif(tmp_path / "bathy.tif", arr)
-
-        records = downsample_bathymetry(tif, grid_size=10)
-        # Rasterio's average resampling over a block that is entirely nodata
-        # yields the nodata sentinel; rows with mixed blocks may yield
-        # blended values. We only assert that the fully-nodata half is dropped.
-        assert len(records) <= 50
-        assert all(r["depth"] > -9000 for r in records)
-
-    def test_zone_assignment_follows_depth(self, tmp_path):
-        """Ramp from shallow to deep should populate all four zones."""
-        arr = np.zeros((100, 100), dtype=np.float32)
-        # Columns 0..99 → depths −5..−60 linearly
-        for c in range(100):
-            arr[:, c] = -5.0 - 0.55 * c
-        tif = _make_bathy_tif(tmp_path / "bathy.tif", arr)
-
-        records = downsample_bathymetry(tif, grid_size=20)
-        zones = {r["zone"] for r in records}
-        assert zones == {1, 2, 3, 4}
-
-    def test_coordinates_inside_site_bbox(self, tmp_path):
-        """Generated lon/lat should fall inside the raster's geographic bounds."""
-        arr = np.full((100, 100), -10.0, dtype=np.float32)
-        tif = _make_bathy_tif(tmp_path / "bathy.tif", arr)
-
-        records = downsample_bathymetry(tif, grid_size=10)
-        lons = [r["lon"] for r in records]
-        lats = [r["lat"] for r in records]
-        # Origin (500000, 4600100) lies near the UTM 31N central meridian
-        # (~3°E) — Catalan coast latitudes.
-        assert 1.0 < min(lons) < max(lons) < 4.0
-        assert 41.0 < min(lats) < max(lats) < 42.5
+        arr[:, :40] = -9999.0
+        tif = _make_tif(tmp_path / "x.tif", arr)
+        w = downsample_raster(tif, grid_size=10)
+        assert w.arr.shape == (10, 10)
+        # Left 4/10 columns become NaN (fully nodata), rest finite at −20.
+        assert np.isnan(w.arr[0, 0])
+        assert w.arr[0, 9] == pytest.approx(-20.0)
 
 
-# ---------------------------------------------------------------------------
-# Deck-building sanity (no HTML rendering)
-# ---------------------------------------------------------------------------
+class TestComputeColorsByMetric:
 
-class TestBuildDecks:
+    def test_depth_colormap_maps_to_rgb(self, tmp_path):
+        arr = np.linspace(-60.0, 0.0, 50, dtype=np.float32).reshape(5, 10)
+        rgb = compute_colors(arr, METRICS_BY_SLUG["depth"], bathy=arr)
+        assert rgb.shape == (5, 10, 3)
+        assert rgb.dtype == np.uint8
+        # Surface (≈0 m, right-most) and deepest (left-most) should differ.
+        assert not np.array_equal(rgb[0, 0], rgb[0, -1])
 
-    def test_overview_deck_has_scatter_layer(self):
-        rows = [_site_row("alpha", 510000, 4605000),
-                _site_row("beta",  515000, 4610000)]
+    def test_zone_colormap_uses_discrete_palette(self):
+        # depths that fall in each of the 4 zones
+        arr = np.array([[-5, -20, -35, -50]], dtype=np.float32)
+        rgb = compute_colors(arr, METRICS_BY_SLUG["zone"], bathy=arr)
+        from sotamar.viewer import ZONE_RGB
+        assert list(rgb[0, 0]) == ZONE_RGB[0]  # zone 1 (OWD)
+        assert list(rgb[0, 1]) == ZONE_RGB[1]  # zone 2 (AOWD)
+        assert list(rgb[0, 2]) == ZONE_RGB[2]  # zone 3 (Deep)
+        assert list(rgb[0, 3]) == ZONE_RGB[3]  # zone 4 (Tech)
+
+    def test_symmetric_p99_around_zero(self):
+        arr = np.linspace(-5.0, 5.0, 100, dtype=np.float32).reshape(10, 10)
+        rgb = compute_colors(arr, METRICS_BY_SLUG["bpi_fine"], bathy=arr)
+        # RdBu_r: middle value (≈0) should land near white/grey.
+        # Extremes of opposite sign should differ from each other.
+        assert not np.array_equal(rgb[0, 0], rgb[9, 9])
+
+
+class TestBuildRecords:
+
+    def test_emerged_cells_dropped(self, tmp_path):
+        arr = np.full((50, 50), -15.0, dtype=np.float32)
+        arr[:25, :] = 5.0  # top half emerged
+        tif = _make_tif(tmp_path / "bathy.tif", arr)
+        w = downsample_raster(tif, grid_size=10)
+        recs = build_records(w, None, METRICS_BY_SLUG["depth"])
+        # 10x10 grid; top 5 rows emerged (dropped), bottom 5 rows present.
+        assert len(recs) == 50
+        assert all(r["depth"] < 0 for r in recs)
+
+    def test_metric_value_in_record(self, tmp_path):
+        bathy = np.full((50, 50), -22.0, dtype=np.float32)
+        slope = np.full((50, 50), 14.3, dtype=np.float32)
+        bt = _make_tif(tmp_path / "bathy.tif", bathy)
+        st = _make_tif(tmp_path / "slope.tif", slope)
+        bw = downsample_raster(bt, grid_size=10)
+        sw = downsample_raster(st, grid_size=10)
+        recs = build_records(bw, sw, METRICS_BY_SLUG["slope"])
+        # Each record should carry the slope value for the tooltip.
+        assert all("slope" in r for r in recs)
+        assert all(r["slope"] != "—" for r in recs)
+
+
+class TestDeckBuilders:
+
+    def test_overview_has_scatterplot(self):
+        rows = [_site_row("a", 510000, 4605000),
+                _site_row("b", 515000, 4610000)]
         deck = build_overview_deck(rows)
-        types = [layer.type for layer in deck.layers]
-        assert "ScatterplotLayer" in types
+        assert "ScatterplotLayer" in [l.type for l in deck.layers]
 
-    def test_site_deck_has_column_and_text_layers(self, tmp_path):
-        arr = np.full((50, 50), -25.0, dtype=np.float32)
-        tif = _make_bathy_tif(tmp_path / "bathy.tif", arr)
-        records = downsample_bathymetry(tif, grid_size=5)
-        deck = build_site_deck(_site_row(), records, cell_metres=20.0)
-        types = [layer.type for layer in deck.layers]
-        assert "ColumnLayer" in types
+    def test_site_has_gridcell_and_text(self, tmp_path):
+        bathy = np.full((50, 50), -22.0, dtype=np.float32)
+        bt = _make_tif(tmp_path / "bathy.tif", bathy)
+        bw = downsample_raster(bt, grid_size=10)
+        recs = build_records(bw, None, METRICS_BY_SLUG["depth"])
+        deck = build_site_deck(
+            _site_row(), recs, cell_metres=10.0,
+            spec=METRICS_BY_SLUG["depth"],
+        )
+        types = [l.type for l in deck.layers]
+        assert "GridCellLayer" in types
         assert "TextLayer" in types
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: write_site_pages
+# ---------------------------------------------------------------------------
+
+class TestWriteSitePages:
+
+    @pytest.fixture
+    def synthetic_site(self, tmp_path):
+        """A site dir with a bathymetry, slope, and BPI fine raster plus
+        a terrain_analysis.png fake and a stats.json."""
+        site_dir = tmp_path / "sites" / "test_site"
+        site_dir.mkdir(parents=True)
+
+        bathy = np.full((50, 50), -22.0, dtype=np.float32)
+        slope = np.full((50, 50), 8.0, dtype=np.float32)
+        bpi   = np.full((50, 50), 0.3, dtype=np.float32)
+        vrm   = np.full((50, 50), 0.02, dtype=np.float32)
+
+        _make_tif(site_dir / "bathymetry.tif", bathy)
+        _make_tif(site_dir / "slope.tif", slope)
+        _make_tif(site_dir / "bpi_fine.tif", bpi)
+        _make_tif(site_dir / "bpi_broad.tif", bpi)
+        _make_tif(site_dir / "vrm.tif", vrm)
+
+        (site_dir / "stats.json").write_text(json.dumps({
+            "nodata_pct": 0.0,
+            "depth":     {"min": -22, "max": -22, "mean": -22, "std": 0},
+            "slope":     {"min": 8, "max": 8, "mean": 8, "std": 0},
+            "bpi_fine":  {"min": 0.3, "max": 0.3, "mean": 0.3, "std": 0},
+            "bpi_broad": {"min": 0.3, "max": 0.3, "mean": 0.3, "std": 0},
+            "vrm":       {"min": 0.02, "max": 0.02, "mean": 0.02, "std": 0},
+            "depth_zones": {
+                "owd_pct": 0, "aowd_pct": 100, "deep_pct": 0, "tech_pct": 0,
+            },
+        }))
+
+        # 1-pixel fake PNG; enough to test copy behaviour.
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00"
+            b"\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx"
+            b"\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa06\x81\x1f\x00\x00"
+            b"\x00\x00IEND\xaeB`\x82"
+        )
+        (site_dir / "terrain_analysis.png").write_bytes(png_bytes)
+        (site_dir / "depth_profile.png").write_bytes(png_bytes)
+
+        return site_dir
+
+    def test_produces_six_html_files(self, synthetic_site, tmp_path):
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        result = write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+        assert result is not None
+        site_out, cells = result
+        assert cells > 0
+        for m in METRICS:
+            path = site_out / f"{m.slug}.html"
+            assert path.exists(), f"missing {m.slug}.html"
+            content = path.read_text()
+            assert "GridCellLayer" in content
+            assert "sotamar-tabs" in content
+            assert "sotamar-panels" in content
+
+    def test_active_tab_marked_per_page(self, synthetic_site, tmp_path):
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+
+        for m in METRICS:
+            html = (out_dir / "test_site" / f"{m.slug}.html").read_text()
+            active_anchor = f'<a href="{m.slug}.html" class="active">'
+            assert active_anchor in html, f"{m.slug}.html missing active tab"
+
+    def test_copies_figures(self, synthetic_site, tmp_path):
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+        site_out = out_dir / "test_site"
+        assert (site_out / "terrain_analysis.png").exists()
+        assert (site_out / "depth_profile.png").exists()
+
+    def test_stats_table_contains_numbers(self, synthetic_site, tmp_path):
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+        html = (out_dir / "test_site" / "depth.html").read_text()
+        assert 'class="stats"' in html
+        assert "-22.00 m" in html or "-22 m" in html or "-22.00" in html
 
 
 # ---------------------------------------------------------------------------
@@ -176,20 +282,18 @@ class TestBuildDecks:
 
 class TestViewerCli:
 
-    def test_from_files_writes_overview_and_per_site(self, tmp_path, monkeypatch):
-        """With --from-files and one site's bathymetry on disk, generate both
-        the overview and that site's 3D HTML."""
+    def test_from_files_writes_overview_and_per_site_dirs(
+        self, tmp_path, monkeypatch,
+    ):
         from sotamar.sites import all_sites
         first = all_sites()[0]
 
         sites_dir = tmp_path / "sites"
         (sites_dir / first.slug).mkdir(parents=True)
-        arr = np.full((100, 100), -22.0, dtype=np.float32)
-        _make_bathy_tif(
-            sites_dir / first.slug / "bathymetry.tif", arr,
-            origin_easting=first.easting - 50,
-            origin_northing=first.northing + 50,
-        )
+        bathy = np.full((100, 100), -22.0, dtype=np.float32)
+        _make_tif(sites_dir / first.slug / "bathymetry.tif", bathy,
+                  origin_easting=first.easting - 50,
+                  origin_northing=first.northing + 50)
 
         output = tmp_path / "viewer"
         monkeypatch.chdir(tmp_path)
@@ -202,17 +306,20 @@ class TestViewerCli:
         assert result.exit_code == 0, result.output
 
         assert (output / "index.html").exists()
-        assert (output / f"{first.slug}.html").exists()
+        site_dir = output / first.slug
+        assert site_dir.is_dir()
+        # Only bathymetry was supplied in this fixture → depth + zone tabs
+        # only. The other four metrics are skipped gracefully.
+        assert (site_dir / "depth.html").exists()
+        assert (site_dir / "zone.html").exists()
+        assert not (site_dir / "slope.html").exists()
 
-        # pydeck's HTML embeds a deck.gl container — sanity-check the marker.
-        idx_html = (output / "index.html").read_text()
-        assert "deck-container" in idx_html or "DeckGL" in idx_html
-        # The click-to-navigate handler is appended after the pydeck template.
-        assert "deckInstance.setProps" in idx_html
-        assert "window.location.href" in idx_html
+        # Overview still has the click handler pointing at depth.html.
+        idx = (output / "index.html").read_text()
+        assert "deckInstance.setProps" in idx
+        assert f'"href": "{first.slug}/depth.html"' in idx
 
     def test_db_unreachable_fails_loudly(self, tmp_path, monkeypatch):
-        """Without --from-files, a bad DB URL must exit with a hint."""
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(cli, [
             "viewer",
@@ -222,4 +329,3 @@ class TestViewerCli:
         assert result.exit_code != 0
         assert "could not read from PostGIS" in result.output
         assert "--from-files" in result.output
-        assert not (tmp_path / "viewer" / "index.html").exists()

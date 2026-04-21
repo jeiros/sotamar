@@ -341,15 +341,15 @@ def viewer(db_url, sites_dir, output, from_files, grid_size):
     )
 
     click.echo(f"Wrote overview → {summary.overview}")
-    for slug, path, cells in summary.sites:
-        click.echo(f"Wrote 3D view → {path} ({cells} cells)")
+    for slug, site_dir, cells in summary.sites:
+        click.echo(f"Wrote {len(viewermod.METRICS)} metric views → "
+                   f"{site_dir}/ ({cells} cells)")
     if summary.skipped:
         click.echo(f"\n  skipped {len(summary.skipped)} site(s):")
         for slug, reason in summary.skipped:
             click.echo(f"    - {slug}: {reason}")
-    click.echo(
-        f"\nWrote {1 + len(summary.sites)} HTML file(s) to {output}/"
-    )
+    total = 1 + len(summary.sites) * len(viewermod.METRICS)
+    click.echo(f"\nWrote {total} HTML file(s) to {output}/")
 
 
 def _json_default(obj):
