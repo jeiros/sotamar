@@ -81,13 +81,40 @@ docker compose exec postgis psql -U sotamar -d sotamar \
 uv run sotamar viewer
 ```
 
-This writes to `data/viewer/`:
-- `index.html` — 18 sites as clickable markers on a CARTO basemap.
-  Tooltips show name, region, character, max depth, per-zone area
-  percentages, and a link into each site's 3D view.
-- `{slug}.html` per site — a pydeck `ColumnLayer` rendering the
-  downsampled seabed as extruded columns. Colour encodes the
-  recreational dive zone (OWD / AOWD / Deep / Technical).
+This writes a nested tree under `data/viewer/`:
+
+```
+data/viewer/
+  index.html                       ← overview, 18 markers on a CARTO basemap
+  illes_medes/
+    depth.html                     ← default entry point
+    zone.html
+    slope.html
+    bpi_fine.html
+    bpi_broad.html
+    vrm.html
+    terrain_analysis.png           ← copied from data/sites/
+    depth_profile.png
+  roses/…
+```
+
+Each per-site page is a **tabbed multi-metric view**:
+
+- The top tab bar (`Depth · Zone · Slope · Fine BPI · Broad BPI · VRM`)
+  re-colours the same 3D `GridCellLayer` surface using the matching
+  raster and a matplotlib colormap aligned with the static thesis
+  figures. Geometry (cell positions, heights) is shared across tabs so
+  switching tab compares the same terrain under different analytical
+  lenses.
+- The surface extrudes upward on an ocean-blue canvas (no basemap):
+  column height = `max|depth| − |depth|` with 5× vertical exaggeration,
+  so shallow reef crests tower and the deepest flat areas lie flush
+  with the floor.
+- Below the 3D view every page embeds the pre-rendered 6-panel
+  `terrain_analysis.png`, `depth_profile.png`, and a compact
+  `stats.json` table.
+- Missing raster → tab is omitted for that site. Sites with no
+  bathymetry on disk are listed under "skipped" in the CLI output.
 
 No server is needed — the files are self-contained and pull the
 deck.gl bundle from unpkg on open.
