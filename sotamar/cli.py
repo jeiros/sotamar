@@ -294,6 +294,64 @@ def export_geojson(db_url, output, from_files, pretty):
     click.echo(f"Wrote {len(rows)} features to {out_path}")
 
 
+@cli.command()
+@click.option(
+    "--db-url", envvar="SOTAMAR_DB_URL", default=None,
+    help="PostgreSQL URL (default from SOTAMAR_DB_URL or localhost:5432/sotamar).",
+)
+@click.option(
+    "--sites-dir", type=click.Path(file_okay=False), default="data/sites",
+    help="Per-site output directory (default: data/sites).",
+)
+@click.option(
+    "--output", "-o", type=click.Path(file_okay=False),
+    default="data/viewer",
+    help="Directory for generated HTML (default: data/viewer).",
+)
+@click.option(
+    "--from-files", is_flag=True,
+    help="Bypass DB; read site registry + stats.json directly.",
+)
+@click.option(
+    "--grid-size", type=int, default=50,
+    help="Downsample grid per site (default 50×50 ≈ 40 m cells).",
+)
+def viewer(db_url, sites_dir, output, from_files, grid_size):
+    """Generate a static HTML viewer: overview map + per-site 3D seabed."""
+    from sotamar import db as dbmod
+    from sotamar import viewer as viewermod
+
+    if from_files:
+        rows = dbmod.site_rows_from_files(Path(sites_dir))
+        click.echo(f"Read {len(rows)} sites from file registry.")
+    else:
+        try:
+            engine = dbmod.get_engine(db_url)
+            rows = dbmod.fetch_sites_with_stats(engine)
+        except Exception as exc:
+            raise click.ClickException(
+                f"could not read from PostGIS: {exc}\n"
+                "Hint: pass --from-files to bypass the database."
+            )
+        click.echo(f"Read {len(rows)} sites from database.")
+
+    summary = viewermod.write_viewer(
+        rows, output_dir=Path(output), sites_dir=Path(sites_dir),
+        grid_size=grid_size,
+    )
+
+    click.echo(f"Wrote overview → {summary.overview}")
+    for slug, path, cells in summary.sites:
+        click.echo(f"Wrote 3D view → {path} ({cells} cells)")
+    if summary.skipped:
+        click.echo(f"\n  skipped {len(summary.skipped)} site(s):")
+        for slug, reason in summary.skipped:
+            click.echo(f"    - {slug}: {reason}")
+    click.echo(
+        f"\nWrote {1 + len(summary.sites)} HTML file(s) to {output}/"
+    )
+
+
 def _json_default(obj):
     """JSON fallback for decimal/datetime-like values coming back from pg."""
     from decimal import Decimal

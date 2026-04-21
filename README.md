@@ -30,6 +30,21 @@ Per-site outputs land in `data/sites/{slug}/`: seven GeoTIFFs (bathymetry,
 slope, hillshade, BPI fine/broad, VRM, depth zones), `stats.json`, and
 two figures (`terrain_analysis.*`, `depth_profile.*`).
 
+## Viewer
+
+Generate a standalone HTML viewer — overview map of every site plus a
+3D ColumnLayer seabed per site:
+
+```bash
+uv run sotamar viewer                # reads from PostGIS
+uv run sotamar viewer --from-files   # bypasses DB
+```
+
+Output lands in `data/viewer/`: `index.html` (18 markers on a CARTO
+basemap) and one `{slug}.html` per site (3D seabed, coloured by
+recreational dive zone). Open `index.html` in any browser — no server
+needed.
+
 ## Database
 
 A PostGIS service (Docker Compose) provides the catalogue store.

@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib>=3.9",
     "numpy>=2.0",
     "psycopg[binary]>=3.2",
+    "pydeck>=0.9",
     "pyproj>=3.6",
     "rasterio>=1.4",
     "scipy>=1.14",

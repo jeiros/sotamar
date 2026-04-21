@@ -11,6 +11,8 @@ build/
 # Data (large files, generated)
 data/icgc/
 data/sites/
+data/viewer/
+data/catalog/
 
 # IDE
 .idea/
