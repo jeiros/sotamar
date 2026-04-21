@@ -21,6 +21,12 @@ log = logging.getLogger(__name__)
 # is not set. Explicit here so the generated HTML is reproducible.
 BASEMAP_STYLE = "light"
 
+# Vertical exaggeration for per-site 3D views. Bathymetric relief (metres) is
+# tiny next to site widths (kilometres), so a multiplier is standard practice
+# in GIS. 5× renders a 60 m depth range as 300 m visual height — legible at
+# zoom 14 with pitch 50° without looking cartoonish.
+VERTICAL_EXAGGERATION = 5.0
+
 ZONE_KEYS = ("owd", "aowd", "deep", "tech")
 ZONE_LABEL_BY_NUM = {
     1: "Zone 1 (OWD, 0 to −18 m)",
@@ -212,13 +218,23 @@ def downsample_bathymetry(
 def build_site_deck(
     site_row: SiteRow, records: list[dict], cell_metres: float,
 ) -> pdk.Deck:
-    """Build the per-site 3D view: ColumnLayer + floating label."""
+    """Build the per-site 3D view: ColumnLayer + floating label.
+
+    Columns extrude UPWARD from the basemap (deck.gl renders map tiles at
+    z=0, which would occlude anything below). We map depth to an "inverted
+    relief" where column height = max_abs_depth − |depth|: shallow pinnacles
+    become tall columns, deep plains sit flat on the map. Terrain shape is
+    preserved; only the reference frame is flipped.
+    """
+    max_abs = max(abs(r["depth"]) for r in records) if records else 0.0
+    for r in records:
+        r["height"] = round(max_abs + r["depth"], 2)  # depth is negative
     column_layer = pdk.Layer(
         "ColumnLayer",
         data=records,
         get_position=["lon", "lat"],
-        get_elevation="depth",
-        elevation_scale=1,
+        get_elevation="height",
+        elevation_scale=VERTICAL_EXAGGERATION,
         radius=cell_metres / 2,
         get_fill_color="color",
         pickable=True,
@@ -246,7 +262,12 @@ def build_site_deck(
     )
 
     tooltip = {
-        "html": "<b>Depth:</b> {depth} m<br/><b>{zone_label}</b>",
+        "html": (
+            "<b>Depth:</b> {depth} m<br/>"
+            "<b>{zone_label}</b><br/>"
+            "<i style='color:#666;'>Taller column = shallower seabed "
+            f"(×{VERTICAL_EXAGGERATION:g} vertical exaggeration)</i>"
+        ),
         "style": {"backgroundColor": "white", "color": "#222",
                   "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
     }
