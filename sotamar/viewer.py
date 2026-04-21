@@ -220,20 +220,17 @@ def build_site_deck(
 ) -> pdk.Deck:
     """Build the per-site 3D view: ColumnLayer + floating label.
 
-    Columns extrude UPWARD from the basemap (deck.gl renders map tiles at
-    z=0, which would occlude anything below). We map depth to an "inverted
-    relief" where column height = max_abs_depth − |depth|: shallow pinnacles
-    become tall columns, deep plains sit flat on the map. Terrain shape is
-    preserved; only the reference frame is flipped.
+    No basemap: the CARTO land map makes the Mediterranean show as featureless
+    grey and makes the 3D columns look like they sit on top of land. We
+    render on an ocean-blue canvas (see _inject_ocean_background) with
+    native negative depths so the seabed extrudes downward from the
+    (implicit) sea surface — a proper bathymetric viewpoint.
     """
-    max_abs = max(abs(r["depth"]) for r in records) if records else 0.0
-    for r in records:
-        r["height"] = round(max_abs + r["depth"], 2)  # depth is negative
     column_layer = pdk.Layer(
         "ColumnLayer",
         data=records,
         get_position=["lon", "lat"],
-        get_elevation="height",
+        get_elevation="depth",  # depth is negative → columns extrude downward
         elevation_scale=VERTICAL_EXAGGERATION,
         radius=cell_metres / 2,
         get_fill_color="color",
@@ -247,8 +244,8 @@ def build_site_deck(
         data=[{"lon": site_row.lon, "lat": site_row.lat, "text": site_row.name}],
         get_position=["lon", "lat"],
         get_text="text",
-        get_size=16,
-        get_color=[20, 20, 20],
+        get_size=18,
+        get_color=[240, 240, 240],
         get_alignment_baseline="'bottom'",
         billboard=True,
     )
@@ -257,7 +254,7 @@ def build_site_deck(
         longitude=site_row.lon,
         latitude=site_row.lat,
         zoom=14,
-        pitch=50,
+        pitch=55,
         bearing=0,
     )
 
@@ -265,8 +262,8 @@ def build_site_deck(
         "html": (
             "<b>Depth:</b> {depth} m<br/>"
             "<b>{zone_label}</b><br/>"
-            "<i style='color:#666;'>Taller column = shallower seabed "
-            f"(×{VERTICAL_EXAGGERATION:g} vertical exaggeration)</i>"
+            f"<i style='color:#666;'>×{VERTICAL_EXAGGERATION:g} vertical "
+            "exaggeration</i>"
         ),
         "style": {"backgroundColor": "white", "color": "#222",
                   "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
@@ -275,9 +272,27 @@ def build_site_deck(
     return pdk.Deck(
         layers=[column_layer, label_layer],
         initial_view_state=view,
-        map_style=BASEMAP_STYLE,
+        map_style=None,
+        map_provider=None,  # both are required to fully disable the basemap
         tooltip=tooltip,
     )
+
+
+# Injected into per-site HTML so the canvas has an ocean-blue background
+# instead of deck.gl's default black. #0a3d62 reads as deep Mediterranean.
+_SITE_BACKGROUND_STYLE = """
+<style>
+  body, #deck-container { background: #0a3d62 !important; }
+  #deck-container canvas { background: #0a3d62 !important; }
+</style>
+"""
+
+
+def _inject_ocean_background(html_path: Path) -> None:
+    """Give per-site HTML an ocean-blue canvas background."""
+    html = html_path.read_text()
+    html = html.replace("</head>", f"{_SITE_BACKGROUND_STYLE}</head>")
+    html_path.write_text(html)
 
 
 # -- Orchestration ------------------------------------------------------------
@@ -330,6 +345,7 @@ def write_viewer(
         build_site_deck(row, records, cell_metres).to_html(
             str(site_path), iframe_height=800, notebook_display=False,
         )
+        _inject_ocean_background(site_path)
         sites_out.append((row.slug, site_path, len(records)))
 
     return ViewerSummary(
