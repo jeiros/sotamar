@@ -112,9 +112,10 @@ def site_point_utm_wkt(site: Site) -> str:
 
 
 def site_bbox_utm_wkt(site: Site) -> str:
-    l, b, r, t = site.bounds
+    left, bottom, right, top = site.bounds
     return (
-        f"POLYGON(({l} {b}, {r} {b}, {r} {t}, {l} {t}, {l} {b}))"
+        f"POLYGON(({left} {bottom}, {right} {bottom}, "
+        f"{right} {top}, {left} {top}, {left} {bottom}))"
     )
 
 
