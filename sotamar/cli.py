@@ -196,6 +196,7 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
     plot_terrain_analysis(
         elevation, slope, bpi_fine, bpi_broad, vrm, depth_zones,
         site.bounds, site.name, output_dir,
+        markers=list(site.markers) or None,
     )
 
     click.echo("  Generating depth profile figure...")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patheffects
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import BoundaryNorm, ListedColormap
@@ -43,9 +44,18 @@ def plot_terrain_analysis(
     bounds: tuple[float, float, float, float],
     site_name: str,
     output_dir: Path,
+    markers: list[tuple[float, float, str]] | None = None,
 ) -> None:
-    """Generate 6-panel terrain analysis figure (2x3 grid). Saves PNG + PDF."""
-    extent = _make_extent(bounds)
+    """Generate 6-panel terrain analysis figure (2x3 grid). Saves PNG + PDF.
+
+    Axes show metres offset from the site centre, so distances read directly.
+    Optional `markers` are (easting, northing, label) in EPSG:25831 and are
+    overlaid on every panel.
+    """
+    left, bottom, right, top = bounds
+    cx, cy = (left + right) / 2.0, (bottom + top) / 2.0
+    extent = (left - cx, right - cx, bottom - cy, top - cy)
+    marker_pts = [(e - cx, n - cy, lbl) for (e, n, lbl) in (markers or [])]
 
     # (title, array, cmap, vmax_mode): "auto" | "symmetric" | "p99"
     datasets = [
@@ -72,23 +82,41 @@ def plot_terrain_analysis(
             im = ax.imshow(arr, **kw)
         plt.colorbar(im, ax=ax, shrink=0.8)
         ax.set_title(title)
-        ax.set_xlabel("Easting (m)")
-        ax.set_ylabel("Northing (m)")
+        ax.set_xlabel("E offset (m)")
+        ax.set_ylabel("N offset (m)")
         _apply_axis_ticks(ax)
+        _draw_markers(ax, marker_pts)
 
-    _plot_depth_zones_panel(axes_flat[5], depth_zones, extent)
+    _plot_depth_zones_panel(axes_flat[5], depth_zones, extent, marker_pts)
 
     fig.suptitle(
-        f"Bathymetric Terrain Analysis \u2014 {site_name}",
-        fontsize=14, fontweight="bold", y=0.98,
+        f"Bathymetric Terrain Analysis \u2014 {site_name}  "
+        f"(centre: {cx:.0f} E, {cy:.0f} N, EPSG:25831)",
+        fontsize=13, fontweight="bold", y=0.98,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     _save_figure(fig, "terrain_analysis", output_dir)
     plt.close(fig)
 
 
+def _draw_markers(ax, marker_pts: list[tuple[float, float, str]]) -> None:
+    """Overlay labelled markers on a panel (coords already in offset metres)."""
+    for mx, my, lbl in marker_pts:
+        ax.plot(mx, my, marker="+", color="red", markersize=12, mew=1.8,
+                zorder=5)
+        ax.annotate(
+            lbl, (mx, my), xytext=(6, 6), textcoords="offset points",
+            fontsize=8, color="red", fontweight="bold",
+            path_effects=[
+                matplotlib.patheffects.withStroke(linewidth=2, foreground="white"),
+            ],
+            zorder=6,
+        )
+
+
 def _plot_depth_zones_panel(
     ax, depth_zones: np.ndarray, extent: tuple[float, float, float, float],
+    marker_pts: list[tuple[float, float, str]] | None = None,
 ) -> None:
     """Render the discrete depth-zones panel with legend."""
     cmap = ListedColormap(ZONE_COLORS)
@@ -98,11 +126,12 @@ def _plot_depth_zones_panel(
         origin="upper", aspect="equal",
     )
     ax.set_title("Depth zones")
-    ax.set_xlabel("Easting (m)")
-    ax.set_ylabel("Northing (m)")
+    ax.set_xlabel("E offset (m)")
+    ax.set_ylabel("N offset (m)")
     handles = [Patch(color=c, label=lbl) for c, lbl in zip(ZONE_COLORS, ZONE_LABELS)]
     ax.legend(handles=handles, loc="lower left", fontsize=7, framealpha=0.9)
     _apply_axis_ticks(ax)
+    _draw_markers(ax, marker_pts or [])
 
 
 def _apply_axis_ticks(ax) -> None:

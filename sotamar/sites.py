@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class Site:
     transect: tuple[tuple[float, float], tuple[float, float]] | None = None
     description: str | None = None
     max_depth: float | None = None
+    markers: tuple[tuple[float, float, str], ...] = field(default_factory=tuple)
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -187,6 +188,24 @@ _register(Site(
     northing=4636000,
     region="Costa Brava",
     character="Rocky cape near Palamós, moderate relief",
+))
+
+_register(Site(
+    slug="boreas",
+    name="Boreas (wreck)",
+    easting=510000,
+    northing=4631400,
+    region="Costa Brava",
+    character="40 m tugboat wreck, top ~22 m, seabed ~32 m, off Palamós",
+    description=(
+        "Wreck of the Boreas (ex-Pellworm, 40 m deep-sea tugboat) at "
+        "approximately 41.83432° N, 3.12065° E, resting on a sandy "
+        "seabed between ~22 m (wheelhouse) and ~32 m (propeller). "
+        "Used to test whether individual wrecks are resolvable in "
+        "the ICGC v2r1 1 m bathymetry."
+    ),
+    max_depth=32.0,
+    markers=((510018, 4631388, "Boreas"),),
 ))
 
 _register(Site(
