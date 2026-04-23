@@ -159,8 +159,8 @@ _register(Site(
 _register(Site(
     slug="ullastres",
     name="Ullastres",
-    easting=508300,
-    northing=4640900,
+    easting=516700,
+    northing=4637100,
     region="Costa Brava",
     character="Three pinnacles off Llafranc",
     description=(
