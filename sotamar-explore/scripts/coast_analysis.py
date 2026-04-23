@@ -10,6 +10,7 @@ Run: uv run python scripts/coast_analysis.py
 import csv
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -38,7 +39,7 @@ SITES = [
     ("salou",     "Cap de Salou",      344800, 4547200),
 ]
 
-GDAL_ENV = {
+GDAL_ENV: dict[str, Any] = {
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
     "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
     "VSI_CACHE": True,
@@ -58,7 +59,6 @@ def compute_slope(elev, mask):
 
 
 def make_annular_mask(inner_radius, outer_radius):
-    size = 2 * outer_radius + 1
     y, x = np.ogrid[-outer_radius:outer_radius + 1, -outer_radius:outer_radius + 1]
     dist = np.sqrt(x**2 + y**2)
     return (dist >= inner_radius) & (dist <= outer_radius)
@@ -223,7 +223,6 @@ def main():
         with rasterio.open(COG_URL, overview_level=5) as src:
             overview = src.read(1)
             ov_profile = src.profile.copy()
-            ov_bounds = src.bounds
             ov_nodata = src.nodata
             print(f"  Shape: {overview.shape}")
             print(f"  Resolution: {src.res}")
@@ -267,9 +266,9 @@ def main():
                 if all(f.exists() for f in files):
                     print("  All files exist — loading stats from existing data")
                     bathy = rasterio.open(files[0]).read(1)
-                    stats = {"key": key, "label": label}
+                    cached: dict[str, Any] = {"key": key, "label": label}
                     mask = bathy == NODATA
-                    stats["nodata_pct"] = round(mask.sum() / mask.size * 100, 1)
+                    cached["nodata_pct"] = round(mask.sum() / mask.size * 100, 1)
                     for name, fp in zip(
                         ("depth", "slope", "bpi_fine", "bpi_broad", "vrm"), files
                     ):
@@ -278,8 +277,8 @@ def main():
                         s = valid_stats(arr)
                         if s:
                             for k, v in s.items():
-                                stats[f"{name}_{k}"] = round(v, 3)
-                    all_stats.append(stats)
+                                cached[f"{name}_{k}"] = round(v, 3)
+                    all_stats.append(cached)
                     continue
 
                 stats = process_site(src, key, label, cx, cy)

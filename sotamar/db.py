@@ -7,6 +7,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import rasterio
 from geoalchemy2 import Geometry
@@ -288,8 +289,8 @@ def load_all_sites(
 class SiteRow:
     slug: str
     name: str
-    lon: float
-    lat: float
+    lon: float | None
+    lat: float | None
     easting: float
     northing: float
     region: str
@@ -415,9 +416,9 @@ def site_rows_from_files(sites_dir: Path = Path("data/sites")) -> list[SiteRow]:
 def site_rows_to_geojson(rows: list[SiteRow]) -> dict:
     """Build a FeatureCollection dict in WGS84."""
     from datetime import datetime, timezone
-    features = []
+    features: list[dict[str, Any]] = []
     for r in rows:
-        props = {
+        props: dict[str, Any] = {
             "slug": r.slug,
             "name": r.name,
             "region": r.region,

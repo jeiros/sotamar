@@ -6,3 +6,10 @@ from sotamar.sites import Site, get_site, list_sites, all_sites
 from sotamar.io import read_bathymetry_window, save_geotiff
 from sotamar.terrain import compute_slope, compute_hillshade, compute_bpi, compute_vrm
 from sotamar.profile import extract_depth_profile
+
+__all__ = [
+    "Site", "get_site", "list_sites", "all_sites",
+    "read_bathymetry_window", "save_geotiff",
+    "compute_slope", "compute_hillshade", "compute_bpi", "compute_vrm",
+    "extract_depth_profile",
+]

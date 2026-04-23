@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -20,11 +18,11 @@ from sotamar.figures import (
 class TestMakeExtent:
     def test_order(self):
         result = _make_extent((100, 200, 300, 400))
-        assert result == [100, 300, 200, 400]  # [left, right, bottom, top]
+        assert result == (100, 300, 200, 400)  # (left, right, bottom, top)
 
-    def test_returns_list(self):
+    def test_returns_tuple(self):
         result = _make_extent((0, 0, 1, 1))
-        assert isinstance(result, list)
+        assert isinstance(result, tuple)
 
 
 # -- _save_figure -------------------------------------------------------------

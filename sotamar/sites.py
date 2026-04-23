@@ -262,14 +262,15 @@ def verify_coordinates(site: Site) -> dict:
     Requires network access for Nominatim geocoding.
     """
     from geopy.geocoders import Nominatim
+    from geopy.location import Location
     from pyproj import Transformer
 
-    geolocator = Nominatim(user_agent="sotamar-coord-check/0.1", timeout=10)
+    geolocator = Nominatim(user_agent="sotamar-coord-check/0.1", timeout=10)  # pyright: ignore[reportArgumentType]
 
     # Search with geographic context for better results
     query = f"{site.name}, Catalunya, Spain"
     try:
-        location = geolocator.geocode(query)
+        location: Location | None = geolocator.geocode(query)  # pyright: ignore[reportAssignmentType]
     except Exception as exc:
         return {"site": site.slug, "error": f"Geocoding failed: {exc}"}
     if location is None:

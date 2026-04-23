@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -16,7 +17,6 @@ from sotamar.db import SiteRow
 from sotamar.viewer import (
     METRICS,
     METRICS_BY_SLUG,
-    MetricSpec,
     _zone_from_depth,
     build_overview_deck,
     build_records,
@@ -36,7 +36,7 @@ def _make_tif(path: Path, array: np.ndarray, *,
               origin_northing: float = 4600100.0,
               resolution: float = 1.0) -> Path:
     h, w = array.shape
-    profile = {
+    profile: dict[str, Any] = {
         "driver": "GTiff", "dtype": "float32",
         "width": w, "height": h, "count": 1,
         "crs": "EPSG:25831",
@@ -109,7 +109,7 @@ class TestDownsample:
 
 class TestComputeColorsByMetric:
 
-    def test_depth_colormap_maps_to_rgb(self, tmp_path):
+    def test_depth_colormap_maps_to_rgb(self):
         arr = np.linspace(-60.0, 0.0, 50, dtype=np.float32).reshape(5, 10)
         rgb = compute_colors(arr, METRICS_BY_SLUG["depth"], bathy=arr)
         assert rgb.shape == (5, 10, 3)

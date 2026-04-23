@@ -51,8 +51,8 @@ def mask_nd(arr):
     return np.where(arr == NODATA, np.nan, arr)
 
 
-def extent_of(bounds):
-    return [bounds.left, bounds.right, bounds.bottom, bounds.top]
+def extent_of(bounds) -> tuple[float, float, float, float]:
+    return (bounds.left, bounds.right, bounds.bottom, bounds.top)
 
 
 def save(fig, name):
@@ -88,7 +88,7 @@ def plot_coast_overview():
 
     # Site markers
     colors = ["#e41a1c", "#ff7f00", "#4daf4a", "#377eb8", "#984ea3", "#a65628"]
-    for i, (key, label, cx, cy) in enumerate(SITES):
+    for i, (_key, label, cx, cy) in enumerate(SITES):
         rect = Rectangle((cx - HALF, cy - HALF), 2 * HALF, 2 * HALF,
                           linewidth=2, edgecolor=colors[i], facecolor="none")
         ax.add_patch(rect)
@@ -119,7 +119,7 @@ def plot_site_hillshades():
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
     axes_flat = axes.flatten()
 
-    for i, (key, label, cx, cy) in enumerate(SITES):
+    for i, (key, label, _cx, _cy) in enumerate(SITES):
         ax = axes_flat[i]
         filepath = DATA_DIR / f"{key}_bathy.tif"
         if not filepath.exists():
@@ -149,7 +149,7 @@ def plot_site_hillshades():
 
     fig.suptitle("Terrain Character — Six Dive Areas, Catalan Coast",
                  fontsize=14, fontweight="bold", y=0.99)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
     save(fig, "coast_site_hillshades")
     plt.close(fig)
 
@@ -203,7 +203,7 @@ def plot_metric_comparison():
 
     fig.suptitle("Terrain Metric Distributions — Catalan Coast Dive Sites",
                  fontsize=14, fontweight="bold", y=0.99)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
     save(fig, "coast_metric_comparison")
     plt.close(fig)
 
@@ -217,7 +217,7 @@ def plot_site_terrain_panels():
     fig, axes = plt.subplots(n_sites, 3, figsize=(15, 4 * n_sites))
 
     row = 0
-    for key, label, cx, cy in SITES:
+    for key, label, _cx, _cy in SITES:
         if not (DATA_DIR / f"{key}_bathy.tif").exists():
             continue
 
@@ -232,7 +232,7 @@ def plot_site_terrain_panels():
             (mask_nd(vrm), "inferno", "VRM", False),
         ]
 
-        for col, (arr, cmap, clabel, sym) in enumerate(datasets):
+        for col, (arr, cmap, clabel, _sym) in enumerate(datasets):
             ax = axes[row, col] if n_sites > 1 else axes[col]
             im = ax.imshow(arr, cmap=cmap, extent=ext, origin="upper", aspect="equal")
             plt.colorbar(im, ax=ax, shrink=0.8)
@@ -248,7 +248,7 @@ def plot_site_terrain_panels():
 
     fig.suptitle("Terrain Metrics — Catalan Coast Dive Sites",
                  fontsize=14, fontweight="bold", y=1.0)
-    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
     save(fig, "coast_terrain_panels")
     plt.close(fig)
 

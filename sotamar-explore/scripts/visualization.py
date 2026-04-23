@@ -59,7 +59,7 @@ def save_fig(fig, name):
 # --- Task 7: Bathymetry + hillshade -----------------------------------------
 
 def plot_bathymetry():
-    data, bounds, transform = load_raster("medes_bathy.tif")
+    data, bounds, _transform = load_raster("medes_bathy.tif")
     extent = make_extent(bounds)
     masked = mask_nodata(data)
 
@@ -141,7 +141,7 @@ def plot_terrain_analysis():
 
     fig.suptitle("Bathymetric Terrain Analysis — Illes Medes, Costa Brava",
                  fontsize=14, fontweight="bold", y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
     save_fig(fig, "medes_terrain_analysis")
     plt.close(fig)
 
@@ -149,7 +149,7 @@ def plot_terrain_analysis():
 # --- Task 9: Depth profile --------------------------------------------------
 
 def plot_depth_profile():
-    data, bounds, transform = load_raster("medes_bathy.tif")
+    data, _bounds, transform = load_raster("medes_bathy.tif")
 
     # E-W transect crossing from deep water to coast, south of Medes Islands
     # Adjust these coordinates after inspecting the bathymetry figure

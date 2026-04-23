@@ -7,6 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
 from pathlib import Path
@@ -81,12 +82,14 @@ def plot_terrain_analysis(
         f"Bathymetric Terrain Analysis \u2014 {site_name}",
         fontsize=14, fontweight="bold", y=0.98,
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
     _save_figure(fig, "terrain_analysis", output_dir)
     plt.close(fig)
 
 
-def _plot_depth_zones_panel(ax, depth_zones: np.ndarray, extent: list[float]) -> None:
+def _plot_depth_zones_panel(
+    ax, depth_zones: np.ndarray, extent: tuple[float, float, float, float],
+) -> None:
     """Render the discrete depth-zones panel with legend."""
     cmap = ListedColormap(ZONE_COLORS)
     norm = BoundaryNorm([0.5, 1.5, 2.5, 3.5, 4.5], cmap.N)
@@ -123,7 +126,7 @@ def plot_depth_profile(
     ax.plot(distances, depths, "steelblue", linewidth=1.5)
     ax.fill_between(
         distances, depths, 0, alpha=0.15, color="steelblue",
-        where=(~np.isnan(depths)) & (depths <= 0),
+        where=(~np.isnan(depths)) & (depths <= 0),  # pyright: ignore[reportArgumentType]
     )
     ax.axhline(0, color="black", linewidth=0.5)
 
@@ -144,13 +147,13 @@ def plot_depth_profile(
     plt.close(fig)
 
 
-def _make_extent(bounds: tuple[float, float, float, float]) -> list[float]:
+def _make_extent(bounds: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     """Convert (left, bottom, right, top) to matplotlib imshow extent."""
     left, bottom, right, top = bounds
-    return [left, right, bottom, top]
+    return (left, right, bottom, top)
 
 
-def _save_figure(fig: plt.Figure, name: str, output_dir: Path) -> None:
+def _save_figure(fig: Figure, name: str, output_dir: Path) -> None:
     """Save figure as both PDF and PNG at 300 DPI."""
     output_dir.mkdir(parents=True, exist_ok=True)
     for ext in ("pdf", "png"):

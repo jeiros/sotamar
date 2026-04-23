@@ -290,7 +290,7 @@ def build_overview_deck(rows: list[SiteRow]) -> pdk.Deck:
     }
     return pdk.Deck(
         layers=[layer], initial_view_state=view,
-        map_style=BASEMAP_STYLE, tooltip=tooltip,
+        map_style=BASEMAP_STYLE, tooltip=tooltip,  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -368,8 +368,8 @@ def build_site_deck(site_row: SiteRow, records: list[dict],
     )
     return pdk.Deck(
         layers=[cell_layer, label_layer], initial_view_state=view,
-        map_style=None, map_provider=None,
-        tooltip=_tooltip_for(spec),
+        map_style=None, map_provider=None,  # pyright: ignore[reportArgumentType]
+        tooltip=_tooltip_for(spec),  # pyright: ignore[reportArgumentType]
     )
 
 

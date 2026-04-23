@@ -16,7 +16,7 @@ class TestDiveThresholds:
         assert len(DIVE_THRESHOLDS) == 4
 
     def test_all_negative(self):
-        for depth, label, color in DIVE_THRESHOLDS:
+        for depth, label, _color in DIVE_THRESHOLDS:
             assert depth < 0, f"Threshold {label} should be negative"
 
     def test_ordered_deepest_last(self):
@@ -24,7 +24,7 @@ class TestDiveThresholds:
         assert depths == sorted(depths, reverse=True)
 
     def test_has_labels_and_colors(self):
-        for depth, label, color in DIVE_THRESHOLDS:
+        for _depth, label, color in DIVE_THRESHOLDS:
             assert isinstance(label, str) and len(label) > 0
             assert isinstance(color, str) and len(color) > 0
 
@@ -124,7 +124,7 @@ class TestExtractDepthProfile:
 
     def test_single_point(self, simple_raster):
         elev, transform = simple_raster
-        distances, depths = extract_depth_profile(
+        distances, _depths = extract_depth_profile(
             elev, transform, (1050, 2050), (1050, 2050), n_points=1,
         )
         assert len(distances) == 1

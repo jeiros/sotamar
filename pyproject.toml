@@ -28,3 +28,25 @@ dev = ["pytest>=8.0"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.basedpyright]
+include = ["sotamar", "sotamar-explore", "tests"]
+pythonVersion = "3.12"
+# Silence the noise from third-party libs without type stubs
+# (rasterio, geoalchemy2, pydeck, matplotlib, geopy, pytest fixtures).
+reportMissingTypeStubs = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportMissingParameterType = "none"
+reportAny = "none"
+reportExplicitAny = "none"
+reportUnusedCallResult = "none"
+reportImplicitStringConcatenation = "none"
+reportCallInDefaultInitializer = "none"
+reportMissingTypeArgument = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = "none"

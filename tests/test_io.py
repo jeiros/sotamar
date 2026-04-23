@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 import rasterio
+import rasterio.enums
 
 from sotamar.io import (
-    NODATA_GEOTIFF,
     compute_depth_zone_pcts,
     compute_stats,
     find_cog,
@@ -93,13 +92,13 @@ class TestReadBathymetryWindow:
         # The synthetic raster covers 500000-500100 E, 4599950-4600050 N
         # Request a window extending beyond the right edge
         bounds = (500050, 4599950, 500200, 4600050)
-        elev, mask, _ = read_bathymetry_window(bounds, synthetic_cog)
+        elev, _mask, _ = read_bathymetry_window(bounds, synthetic_cog)
         assert elev.shape[1] == 50  # clipped to available data
 
     def test_full_window_read(self, synthetic_cog):
         """Reading the full extent should return the whole raster."""
         bounds = (500000, 4599950, 500100, 4600050)
-        elev, mask, _ = read_bathymetry_window(bounds, synthetic_cog)
+        elev, _mask, _ = read_bathymetry_window(bounds, synthetic_cog)
         assert elev.shape == (100, 100)
 
 

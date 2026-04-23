@@ -24,7 +24,7 @@ class TestSiteDataclass:
             region="R", character="C",
         )
         with pytest.raises(AttributeError):
-            site.slug = "y"
+            site.slug = "y"  # pyright: ignore[reportAttributeAccessIssue]
 
     def test_bounds_default_half_size(self):
         site = Site(

@@ -8,15 +8,17 @@ import re
 import urllib.request
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import rasterio
+import rasterio.windows
 from rasterio.env import Env
 from rasterio.windows import from_bounds
 
 # --- Configuration -----------------------------------------------------------
 # Override this if you already know the URL or have a local file:
-COG_URL = "https://datacloud.icgc.cat/datacloud/batimetria/tif_unzip/batimetria-v2r1-elevacions-2021-2025.tif"
+COG_URL: str | None = "https://datacloud.icgc.cat/datacloud/batimetria/tif_unzip/batimetria-v2r1-elevacions-2021-2025.tif"
 
 # Illes Medes extraction window (EPSG:25831 UTM coordinates)
 MEDES_LEFT = 517400
@@ -206,7 +208,7 @@ def extract_medes(src):
 
     # Save local GeoTIFF
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    profile = {
+    profile: dict[str, Any] = {
         "driver": "GTiff",
         "dtype": data.dtype,
         "width": data.shape[1],
@@ -241,7 +243,7 @@ def main():
     is_remote = url.startswith("http://") or url.startswith("https://")
 
     # Task 2 & 3: Open raster and work with it
-    gdal_env = {}
+    gdal_env: dict[str, Any] = {}
     if is_remote:
         gdal_env = {
             "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
@@ -268,7 +270,7 @@ def main():
 
             # Quick sanity read: 100×100 pixel test window
             print("\n--- Test read (100×100 pixels from top-left) ---")
-            test_data = src.read(1, window=rasterio.windows.Window(0, 0, 100, 100))
+            test_data = src.read(1, window=rasterio.windows.Window(0, 0, 100, 100))  # pyright: ignore[reportCallIssue]
             print(f"  Shape: {test_data.shape}, dtype: {test_data.dtype}")
             print(f"  Sample values: {test_data[50, 40:50]}")
 

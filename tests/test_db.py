@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -11,7 +11,6 @@ import rasterio
 from affine import Affine
 
 from sotamar.db import (
-    LAYER_NAMES,
     flatten_stats_for_row,
     load_all_sites,
     raster_bbox_utm_wkt,
@@ -21,7 +20,6 @@ from sotamar.db import (
     upsert_site_rasters,
     upsert_terrain_stats,
 )
-from sotamar.sites import Site
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +59,7 @@ class TestGeometryBuilders:
 
     def test_raster_bbox_raises_on_wrong_crs(self, tmp_path):
         path = tmp_path / "wrong_crs.tif"
-        profile = {
+        profile: dict[str, Any] = {
             "driver": "GTiff", "dtype": "float32",
             "width": 10, "height": 10, "count": 1,
             "crs": "EPSG:4326",
@@ -205,7 +203,7 @@ class TestUpserts:
         site_dir = tmp_path / sample_site.slug
         site_dir.mkdir()
         elev, _ = flat_surface
-        profile = {
+        profile: dict[str, Any] = {
             "driver": "GTiff", "dtype": "float32",
             "width": 100, "height": 100, "count": 1,
             "crs": "EPSG:25831",

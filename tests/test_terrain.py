@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from sotamar.terrain import (
     _make_annular_kernel,

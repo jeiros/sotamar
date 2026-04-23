@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 import rasterio
 from affine import Affine
-from pathlib import Path
 
 from sotamar.sites import Site
 
@@ -85,7 +86,7 @@ def sample_site_with_transect():
 
 # -- GeoTIFF helpers ----------------------------------------------------------
 
-def make_test_profile(shape=(100, 100), origin=(500000.0, 4600050.0)):
+def make_test_profile(shape=(100, 100), origin=(500000.0, 4600050.0)) -> dict[str, Any]:
     """Create a rasterio-compatible profile for a synthetic raster.
 
     Origin is the top-left corner (easting, northing) at 1 m resolution.

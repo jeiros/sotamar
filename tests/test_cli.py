@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
@@ -33,7 +33,7 @@ def small_cog(tmp_path):
     elev = 20.0 * np.exp(-((x - 50) ** 2 + (y - 50) ** 2) / (2 * 20**2))
     elev -= 25.0  # mostly submerged
 
-    profile = {
+    profile: dict[str, Any] = {
         "driver": "GTiff",
         "dtype": "float32",
         "width": 100,
@@ -175,7 +175,7 @@ class TestAnalyzePipeline:
         data = np.full((100, 100), -9999.0, dtype=np.float32)
         data[0, 0] = -20.0  # just 1 pixel of data → 99% nodata
 
-        profile = {
+        profile: dict[str, Any] = {
             "driver": "GTiff",
             "dtype": "float32",
             "width": 100,

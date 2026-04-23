@@ -70,7 +70,6 @@ def compute_slope(elev, mask):
 
 def make_annular_mask(inner_radius, outer_radius):
     """Create a boolean annular kernel: True where inner_r <= dist <= outer_r."""
-    size = 2 * outer_radius + 1
     y, x = np.ogrid[-outer_radius:outer_radius + 1, -outer_radius:outer_radius + 1]
     dist = np.sqrt(x**2 + y**2)
     return (dist >= inner_radius) & (dist <= outer_radius)

@@ -13,7 +13,7 @@ NODATA_GEOTIFF = -9999.0
 DEFAULT_COG_PATH = Path("data/icgc/batimetria-v2r1-elevacions-2021-2025.tif")
 
 
-def find_cog(cog_path: Path | None = None) -> Path:
+def find_cog(cog_path: str | Path | None = None) -> Path:
     """Resolve the COG path. Raises FileNotFoundError if not found."""
     if cog_path is not None:
         p = Path(cog_path)
