@@ -618,19 +618,26 @@ def write_viewer(
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True)
 
+    # Only sites with materialised bathymetry are browseable. Filter both
+    # the overview map and the per-site loop against the same list so a
+    # pin on the overview always corresponds to a real per-site page.
+    renderable: list[SiteRow] = []
+    skipped: list[tuple[str, str]] = []
+    for row in rows:
+        tif = sites_dir / row.slug / "bathymetry.tif"
+        if tif.exists():
+            renderable.append(row)
+        else:
+            skipped.append((row.slug, f"missing {tif}"))
+
     overview_path = output_dir / "index.html"
-    build_overview_deck(rows).to_html(
+    build_overview_deck(renderable).to_html(
         str(overview_path), iframe_height=800, notebook_display=False,
     )
     _inject_overview_click_handler(overview_path)
 
     sites_out: list[tuple[str, Path, int]] = []
-    skipped: list[tuple[str, str]] = []
-    for row in rows:
-        tif = sites_dir / row.slug / "bathymetry.tif"
-        if not tif.exists():
-            skipped.append((row.slug, f"missing {tif}"))
-            continue
+    for row in renderable:
         try:
             result = write_site_pages(row, sites_dir / row.slug,
                                       output_dir, grid_size)
