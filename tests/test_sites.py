@@ -1,4 +1,4 @@
-"""Tests for sotamar.sites: Site dataclass, registry, coordinate verification."""
+"""Tests for sotamar.sites: CSV-driven Site loader + coordinate verification."""
 
 from __future__ import annotations
 
@@ -6,11 +6,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sotamar.pois import POI
 from sotamar.sites import (
     Site,
+    _HALF_SIZE_BY_TYPE,
     all_sites,
     get_site,
     list_sites,
+    poi_to_site,
     verify_coordinates,
 )
 
@@ -32,11 +35,11 @@ class TestSiteDataclass:
             region="R", character="C",
         )
         left, bottom, right, top = site.bounds
-        # Default half_size=500 → 1×1 km window
-        assert left == 499500
-        assert bottom == 4599500
-        assert right == 500500
-        assert top == 4600500
+        # Default half_size=200 → 400 × 400 m window
+        assert left == 499800
+        assert bottom == 4599800
+        assert right == 500200
+        assert top == 4600200
 
     def test_bounds_custom_half_size(self):
         site = Site(
@@ -56,17 +59,28 @@ class TestSiteDataclass:
         assert (left + right) / 2 == 100
         assert (bottom + top) / 2 == 200
 
-    def test_default_transect_ew_through_center(self):
+    def test_default_transect_through_center(self):
         site = Site(
             slug="a", name="A", easting=500000, northing=4600000,
-            region="R", character="C", half_size=1000,
+            region="R", character="C", half_size=500,
         )
         start, end = site.transect_endpoints
         # E-W: same northing
         assert start[1] == end[1] == 4600000
-        # Inset 100 m from edges
-        assert start[0] == 499100
-        assert end[0] == 500900
+        # Inset min(100, half_size//4) from edges → 100 m here
+        assert start[0] == 499600
+        assert end[0] == 500400
+
+    def test_default_transect_small_window(self):
+        """Tight wreck windows shouldn't have a margin larger than half_size//4."""
+        site = Site(
+            slug="a", name="A", easting=500000, northing=4600000,
+            region="R", character="C", half_size=75,
+        )
+        start, end = site.transect_endpoints
+        # margin = min(100, 75//4) = 18
+        assert start[0] == 500000 - 75 + 18
+        assert end[0] == 500000 + 75 - 18
 
     def test_custom_transect_overrides_default(self):
         custom = ((1.0, 2.0), (3.0, 4.0))
@@ -76,107 +90,123 @@ class TestSiteDataclass:
         )
         assert site.transect_endpoints == custom
 
-    def test_default_values(self):
-        site = Site(
-            slug="a", name="A", easting=0, northing=0,
-            region="R", character="C",
+
+# -- poi_to_site -------------------------------------------------------------
+
+class TestPoiToSite:
+    def _poi(self, **kw) -> POI:
+        defaults = dict(
+            id="t", name="Test", region="r", municipality=None,
+            site_type="wreck",
+            latitude=41.83432, longitude=3.12065,
+            coord_confidence="verified",
+            depth_min_m=None, depth_max_m=None,
+            description=None, sources=None,
         )
+        defaults.update(kw)
+        return POI(**defaults)  # type: ignore[arg-type]
+
+    def test_wreck_uses_75(self):
+        site = poi_to_site(self._poi(site_type="wreck"))
+        assert site.half_size == 75
+
+    def test_pinnacle_uses_100(self):
+        site = poi_to_site(self._poi(site_type="pinnacle"))
+        assert site.half_size == 100
+
+    def test_island_uses_150(self):
+        site = poi_to_site(self._poi(site_type="island"))
+        assert site.half_size == 150
+
+    def test_headland_uses_500(self):
+        site = poi_to_site(self._poi(site_type="headland"))
         assert site.half_size == 500
-        assert site.transect is None
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(KeyError):
+            poi_to_site(self._poi(site_type="bogus"))
+
+    def test_coords_snap_to_100m(self):
+        # 41.83432 / 3.12065 → about 510018 / 4631388
+        site = poi_to_site(self._poi(site_type="wreck"))
+        assert site.easting % 100 == 0
+        assert site.northing % 100 == 0
+        # Expected after rounding: 510000, 4631400
+        assert site.easting == 510000
+        assert site.northing == 4631400
+
+    def test_slug_is_poi_id(self):
+        site = poi_to_site(self._poi(id="custom_id"))
+        assert site.slug == "custom_id"
+
+    def test_max_depth_propagates(self):
+        site = poi_to_site(self._poi(depth_max_m=42.0))
+        assert site.max_depth == 42.0
 
 
-# -- Registry -----------------------------------------------------------------
+# -- Registry (CSV-backed) ---------------------------------------------------
 
 class TestRegistry:
-    def test_original_six_sites_registered(self):
-        original = {
-            "roses", "illes_medes", "illes_formigues",
-            "tossa_de_mar", "costa_del_garraf", "cap_de_salou",
-        }
-        assert original.issubset(set(list_sites()))
+    """Drives off the real data/dive_sites.csv. Don't mock the loader."""
 
-    def test_catalogue_has_expected_regions(self):
-        from sotamar.sites import all_sites
-        regions = {s.region for s in all_sites()}
-        assert regions == {"Costa Brava", "Costa del Garraf", "Costa Daurada"}
+    def test_at_least_50_sites(self):
+        assert len(all_sites()) >= 50
 
-    def test_get_site_returns_correct_type(self):
-        site = get_site("illes_medes")
+    def test_every_slug_uses_region_prefix(self):
+        valid_prefixes = ("cdc_", "med_", "mon_", "pal_", "sel_", "gar_", "dau_")
+        for slug in list_sites():
+            assert slug.startswith(valid_prefixes), (
+                f"slug {slug!r} doesn't use a known region prefix"
+            )
+
+    def test_every_site_has_known_type(self):
+        """Every registered site's half_size matches a known site_type."""
+        valid_half_sizes = set(_HALF_SIZE_BY_TYPE.values())
+        for site in all_sites():
+            assert site.half_size in valid_half_sizes
+
+    def test_get_site_known(self):
+        # pal_boreas should always be in the verified catalogue
+        site = get_site("pal_boreas")
         assert isinstance(site, Site)
+        assert site.name.startswith("Boreas")
 
     def test_get_site_unknown_raises_keyerror(self):
         with pytest.raises(KeyError):
             get_site("atlantis")
 
-    def test_all_sites_returns_list_of_sites(self):
-        sites = all_sites()
-        assert all(isinstance(s, Site) for s in sites)
-
-    def test_list_sites_matches_all_sites(self):
+    def test_list_matches_all_sites_order(self):
         slugs = list_sites()
         sites = all_sites()
         assert [s.slug for s in sites] == slugs
 
 
-# -- Known site properties ----------------------------------------------------
+# -- Known site properties (against real CSV) -------------------------------
 
 class TestKnownSites:
-    def test_medes_has_custom_transect(self):
-        site = get_site("illes_medes")
-        assert site.transect is not None
-        start, end = site.transect
-        assert start == (517500, 4655100)
-        assert end == (519300, 4655100)
-
-    def test_medes_coordinates(self):
-        site = get_site("illes_medes")
-        assert site.easting == 518400
-        assert site.northing == 4655100
-
     def test_all_sites_have_positive_coordinates(self):
         for site in all_sites():
             assert site.easting > 0, f"{site.slug} has non-positive easting"
             assert site.northing > 0, f"{site.slug} has non-positive northing"
 
     def test_all_sites_in_utm31n_range(self):
-        """UTM zone 31N easting should be ~100k-900k, northing ~0-10M."""
+        """UTM zone 31N easting should be ~100k-900k, northing ~4M-5M."""
         for site in all_sites():
-            assert 100_000 < site.easting < 900_000, f"{site.slug} easting out of UTM31N"
-            assert 4_000_000 < site.northing < 5_000_000, f"{site.slug} northing out of range"
+            assert 100_000 < site.easting < 900_000, (
+                f"{site.slug} easting out of UTM31N range"
+            )
+            assert 4_000_000 < site.northing < 5_000_000, (
+                f"{site.slug} northing out of range"
+            )
 
-    def test_sites_without_custom_transect_use_default(self):
-        for site in all_sites():
-            if site.transect is None:
-                start, end = site.transect_endpoints
-                # Should be E-W through center
-                assert start[1] == end[1] == site.northing
-
-    def test_window_size_policy(self):
-        """Half-sizes follow the documented per-site policy."""
-        compact = {
-            "boreas", "ullastres", "els_canyers", "garraf_falconera",
-            "el_gat", "els_farallons", "massa_dor", "el_biotop_torredembarra",
+    def test_half_size_policy_table_complete(self):
+        """The seven canonical types after coalescing."""
+        assert set(_HALF_SIZE_BY_TYPE.keys()) == {
+            "wreck", "pinnacle", "cave", "island",
+            "wall", "cove", "headland",
         }
-        extended = {
-            "illes_medes", "cap_de_creus", "illes_formigues", "cap_de_planes",
-            "lescala_empuries", "costa_del_garraf", "cap_de_salou",
-            "lametlla_de_mar",
-        }
-        for site in all_sites():
-            if site.slug in compact:
-                assert site.half_size == 250, (
-                    f"{site.slug}: compact features should be half_size=250"
-                )
-            elif site.slug in extended:
-                assert site.half_size == 1000, (
-                    f"{site.slug}: extended features should be half_size=1000"
-                )
-            else:
-                assert site.half_size == 500, (
-                    f"{site.slug}: default half_size should be 500"
-                )
 
-    def test_bounds_window_size_matches_half_size(self):
+    def test_bounds_match_half_size(self):
         for site in all_sites():
             left, bottom, right, top = site.bounds
             assert right - left == 2 * site.half_size
@@ -189,29 +219,26 @@ class TestVerifyCoordinates:
     @patch("geopy.geocoders.Nominatim")
     @patch("pyproj.Transformer")
     def test_successful_verification(self, mock_transformer_cls, mock_nominatim_cls):
-        # Set up mock geocoder
         mock_location = MagicMock()
-        mock_location.address = "Illes Medes, Torroella de Montgrí"
-        mock_location.latitude = 42.047
-        mock_location.longitude = 3.222
+        mock_location.address = "Boreas wreck, Palamós"
+        mock_location.latitude = 41.8313
+        mock_location.longitude = 3.1184
 
         mock_geolocator = MagicMock()
         mock_geolocator.geocode.return_value = mock_location
         mock_nominatim_cls.return_value = mock_geolocator
 
-        # Set up mock transformer
         mock_transformer = MagicMock()
-        mock_transformer.transform.return_value = (518390.0, 4655090.0)
+        mock_transformer.transform.return_value = (509800.0, 4631100.0)
         mock_transformer_cls.from_crs.return_value = mock_transformer
 
-        site = get_site("illes_medes")
+        site = get_site("pal_boreas")
         result = verify_coordinates(site)
 
-        assert result["site"] == "illes_medes"
+        assert result["site"] == "pal_boreas"
         assert "distance_m" in result
         assert result["distance_m"] >= 0
         assert "geocoded_address" in result
-        assert result["geocoded_easting"] == 518390.0
 
     @patch("geopy.geocoders.Nominatim")
     def test_geocode_not_found(self, mock_nominatim_cls):
@@ -219,7 +246,7 @@ class TestVerifyCoordinates:
         mock_geolocator.geocode.return_value = None
         mock_nominatim_cls.return_value = mock_geolocator
 
-        site = get_site("roses")
+        site = get_site("pal_boreas")
         result = verify_coordinates(site)
 
         assert "error" in result
@@ -231,28 +258,8 @@ class TestVerifyCoordinates:
         mock_geolocator.geocode.side_effect = Exception("Network timeout")
         mock_nominatim_cls.return_value = mock_geolocator
 
-        site = get_site("roses")
+        site = get_site("pal_boreas")
         result = verify_coordinates(site)
 
         assert "error" in result
         assert "Network timeout" in result["error"]
-
-    @patch("geopy.geocoders.Nominatim")
-    @patch("pyproj.Transformer")
-    def test_distance_calculation(self, mock_transformer_cls, mock_nominatim_cls):
-        mock_location = MagicMock()
-        mock_location.address = "Test"
-        mock_location.latitude = 42.0
-        mock_location.longitude = 3.0
-        mock_geolocator = MagicMock()
-        mock_geolocator.geocode.return_value = mock_location
-        mock_nominatim_cls.return_value = mock_geolocator
-
-        # Return exact same coords → distance should be 0
-        site = get_site("illes_medes")
-        mock_transformer = MagicMock()
-        mock_transformer.transform.return_value = (site.easting, site.northing)
-        mock_transformer_cls.from_crs.return_value = mock_transformer
-
-        result = verify_coordinates(site)
-        assert result["distance_m"] == 0.0

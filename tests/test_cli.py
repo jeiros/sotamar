@@ -75,9 +75,9 @@ class TestListCommand:
 
     def test_shows_all_sites(self, runner):
         result = runner.invoke(cli, ["list"])
-        assert "illes_medes" in result.output
-        assert "roses" in result.output
-        assert "cap_de_salou" in result.output
+        assert "med_meda_gran" in result.output
+        assert "pal_boreas" in result.output
+        assert "cdc_cap_norfeu" in result.output
 
     def test_shows_header(self, runner):
         result = runner.invoke(cli, ["list"])
@@ -107,7 +107,7 @@ class TestAnalyzeValidation:
     def test_missing_cog_errors(self, runner, tmp_path):
         # chdir to tmp where no COG exists
         result = runner.invoke(
-            cli, ["analyze", "illes_medes", "--cog", str(tmp_path / "nope.tif")]
+            cli, ["analyze", "pal_boreas", "--cog", str(tmp_path / "nope.tif")]
         )
         assert result.exit_code != 0
 

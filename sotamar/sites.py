@@ -1,18 +1,32 @@
-"""Dive site catalog: dataclass registry with coordinate verification."""
+"""Dive site registry: CSV-driven analysis windows + coordinate verification.
+
+Every verified POI in `data/dive_sites.csv` becomes an analysis Site at
+runtime. Site slugs equal POI ids (e.g. ``pal_boreas``, ``med_meda_gran``).
+Window size (`half_size`) is determined by the POI's `site_type` via
+`_HALF_SIZE_BY_TYPE`. To add or modify a site, edit the CSV — there is no
+static Python registry.
+"""
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
+
+from sotamar.pois import POI, load_pois
 
 
 # Default analysis-window half-size by feature type. The window edge length
-# is 2 × half_size in metres, so half_size=500 yields a 1×1 km window.
-# Tuned to a recreational dive's effective footprint (100–300 m radius)
-# while keeping ~50 m of edge context for the broad-BPI kernel.
-_HALF_SIZE_BY_TYPE = {
-    "wreck": 250, "pinnacle": 250, "rock": 250,
-    "cove": 500, "headland": 500, "wall": 500, "cave": 500,
-    "island": 1000,  # archipelagos / multi-feature areas
+# is 2 × half_size in metres, so half_size=200 yields a 400 × 400 m window.
+# Sized to match recreational dive footprints (100–300 m radius) while
+# keeping ~50 m of edge context for the broad-BPI kernel.
+_HALF_SIZE_BY_TYPE: dict[str, int] = {
+    "wreck":    75,
+    "pinnacle": 100,
+    "cave":     100,
+    "island":   150,
+    "wall":     200,
+    "cove":     200,
+    "headland": 500,
 }
 
 
@@ -26,7 +40,7 @@ class Site:
     northing: float
     region: str
     character: str
-    half_size: int = 500
+    half_size: int = 200
     transect: tuple[tuple[float, float], tuple[float, float]] | None = None
     description: str | None = None
     max_depth: float | None = None
@@ -47,270 +61,70 @@ class Site:
         """Return custom transect if set, else default E-W through center."""
         if self.transect is not None:
             return self.transect
-        margin = 100
+        margin = min(100, self.half_size // 4)
         return (
             (self.easting - self.half_size + margin, self.northing),
             (self.easting + self.half_size - margin, self.northing),
         )
 
 
-# -- Registry -----------------------------------------------------------------
+# -- POI → Site conversion ----------------------------------------------------
 
-_SITES: dict[str, Site] = {}
+def poi_to_site(poi: POI) -> Site:
+    """Build a Site from a verified POI using the per-type half_size policy.
 
-
-def _register(site: Site) -> Site:
-    _SITES[site.slug] = site
-    return site
-
-
-_register(Site(
-    slug="roses",
-    name="Roses",
-    easting=520000,
-    northing=4677000,
-    region="Costa Brava",
-    character="Rocky cape, steep cliffs",
-))
-
-_register(Site(
-    slug="illes_medes",
-    name="Illes Medes",
-    easting=518400,
-    northing=4655100,
-    region="Costa Brava",
-    character="Island MPA, walls & tunnels",
-    half_size=1000,
-    transect=((517500, 4655100), (519300, 4655100)),
-))
-
-_register(Site(
-    slug="illes_formigues",
-    name="Illes Formigues",
-    easting=515400,
-    northing=4634500,
-    region="Costa Brava",
-    character="Rocky islets, gentle shelf",
-    half_size=1000,
-))
-
-_register(Site(
-    slug="tossa_de_mar",
-    name="Tossa de Mar",
-    easting=495100,
-    northing=4618900,
-    region="Costa Brava",
-    character="Medieval coast, steep cliffs",
-))
-
-_register(Site(
-    slug="costa_del_garraf",
-    name="Costa del Garraf",
-    easting=409200,
-    northing=4565300,
-    region="Costa del Garraf",
-    character="Smooth continental shelf",
-    half_size=1000,
-))
-
-_register(Site(
-    slug="cap_de_salou",
-    name="Cap de Salou",
-    easting=344800,
-    northing=4547200,
-    region="Costa Daurada",
-    character="Rocky cape, moderate relief",
-    half_size=1000,
-))
-
-# -- Session 2 additions: expanded catalogue ---------------------------------
-# Coordinates below are approximate — cross-check with check-coords and
-# correct any that drift more than a few hundred metres from expected.
-
-_register(Site(
-    slug="cap_de_creus",
-    name="Cap de Creus",
-    easting=525800,
-    northing=4688900,
-    region="Costa Brava",
-    character="Exposed granite headland, steep walls",
-    half_size=1000,
-))
-
-_register(Site(
-    slug="cap_norfeu",
-    name="Cap Norfeu",
-    easting=519000,
-    northing=4677400,
-    region="Costa Brava",
-    character="Dramatic headland between Roses and Cala Jòncols",
-    description=(
-        "Cap Norfeu at approximately 42.2472° N, 3.2335° E. Verified "
-        "headland with multiple dive sites on its flanks; used as a new "
-        "verified analysis window from the CSV catalogue."
-    ),
-))
-
-_register(Site(
-    slug="massa_dor",
-    name="Massa d'Or",
-    easting=527100,
-    northing=4687200,
-    region="Costa Brava",
-    character="Offshore pinnacle, high relief",
-    half_size=250,
-))
-
-_register(Site(
-    slug="el_gat",
-    name="El Gat",
-    easting=524300,
-    northing=4690100,
-    region="Costa Brava",
-    character="Small rocky islet, vertical relief",
-    half_size=250,
-))
-
-_register(Site(
-    slug="els_farallons",
-    name="Els Farallons",
-    easting=525500,
-    northing=4686600,
-    region="Costa Brava",
-    character="Twin rocks, swim-throughs",
-    half_size=250,
-))
-
-_register(Site(
-    slug="lescala_empuries",
-    name="L'Escala – Empúries",
-    easting=513000,
-    northing=4663400,
-    region="Costa Brava",
-    character="Sandy shelf near Greco-Roman ruins",
-    half_size=1000,
-))
-
-_register(Site(
-    slug="ullastres",
-    name="Ullastres",
-    easting=516700,
-    northing=4637100,
-    region="Costa Brava",
-    character="Three pinnacles off Llafranc",
-    half_size=250,
-    description=(
-        "Three submerged pinnacles (Ullastre I, II, III) at roughly 15–50 m "
-        "depth off Llafranc. One of the best-known recreational dive sites "
-        "on the Costa Brava."
-    ),
-    max_depth=50.0,
-))
-
-_register(Site(
-    slug="els_canyers",
-    name="Els Canyers",
-    easting=510800,
-    northing=4637200,
-    region="Costa Brava",
-    character="Rocky coastal drop-off near Palamós",
-    half_size=250,
-))
-
-_register(Site(
-    slug="cap_de_planes",
-    name="Cap de Planes",
-    easting=513000,
-    northing=4636000,
-    region="Costa Brava",
-    character="Rocky cape near Palamós, moderate relief",
-    half_size=1000,
-))
-
-_register(Site(
-    slug="boreas",
-    name="Boreas (wreck)",
-    easting=510000,
-    northing=4631400,
-    region="Costa Brava",
-    character="40 m tugboat wreck, top ~22 m, seabed ~32 m, off Palamós",
-    half_size=250,
-    description=(
-        "Wreck of the Boreas (ex-Pellworm, 40 m deep-sea tugboat) at "
-        "approximately 41.83432° N, 3.12065° E, resting on a sandy "
-        "seabed between ~22 m (wheelhouse) and ~32 m (propeller). "
-        "Used to test whether individual wrecks are resolvable in "
-        "the ICGC v2r1 1 m bathymetry."
-    ),
-    max_depth=32.0,
-    markers=((510018, 4631388, "Boreas"),),
-))
-
-_register(Site(
-    slug="garraf_falconera",
-    name="La Falconera",
-    easting=408500,
-    northing=4567700,
-    region="Costa del Garraf",
-    character="Karstic cliffs with freshwater seeps",
-    half_size=250,
-    description=(
-        "Submerged karstic spring in the Garraf massif where freshwater "
-        "discharges into the Mediterranean through underwater cave systems."
-    ),
-))
-
-_register(Site(
-    slug="illa_de_la_plana",
-    name="Illa de la Plana",
-    easting=411900,
-    northing=4562800,
-    region="Costa del Garraf",
-    character="Small rocky islet, moderate relief",
-))
-
-_register(Site(
-    slug="el_biotop_torredembarra",
-    name="El Biotop (Torredembarra)",
-    easting=371800,
-    northing=4552400,
-    region="Costa Daurada",
-    character="Artificial reef; bathymetry-gap case study",
-    half_size=250,
-    description=(
-        "Artificial reef module near Torredembarra at approximately "
-        "41.130° N, 1.430° E. Used as a case study of structures absent "
-        "from the ICGC v2r1 bathymetry coverage."
-    ),
-    max_depth=20.0,
-))
-
-_register(Site(
-    slug="lametlla_de_mar",
-    name="L'Ametlla de Mar",
-    easting=306700,
-    northing=4531800,
-    region="Costa Daurada",
-    character="Rocky coastline with caves, near Ebre delta",
-    half_size=1000,
-))
+    Coordinates are snapped to a 100 m UTM grid (matches the CSV's
+    declared verified precision and keeps figures stable across edits).
+    Raises KeyError if the POI's site_type is unknown.
+    """
+    half_size = _HALF_SIZE_BY_TYPE[poi.site_type]
+    easting = round(poi.easting / 100.0) * 100
+    northing = round(poi.northing / 100.0) * 100
+    character = (poi.description or poi.name)[:120]
+    return Site(
+        slug=poi.id,
+        name=poi.name,
+        easting=easting,
+        northing=northing,
+        region=poi.region,
+        character=character,
+        half_size=half_size,
+        description=poi.description,
+        max_depth=poi.depth_max_m,
+    )
 
 
-# -- Accessors ----------------------------------------------------------------
+# -- Registry (CSV-backed, cached) --------------------------------------------
 
-def get_site(slug: str) -> Site:
-    """Look up a site by slug. Raises KeyError if not found."""
-    return _SITES[slug]
+@functools.lru_cache(maxsize=1)
+def _verified_sites() -> tuple[Site, ...]:
+    """Load, filter, and convert every verified POI to a Site.
 
-
-def list_sites() -> list[str]:
-    """Return all registered site slugs."""
-    return list(_SITES.keys())
+    Cached for the lifetime of the process; tests that mutate the CSV
+    must call _verified_sites.cache_clear() between runs.
+    """
+    pois = load_pois()
+    return tuple(
+        poi_to_site(p) for p in pois if p.coord_confidence == "verified"
+    )
 
 
 def all_sites() -> list[Site]:
-    """Return all registered Site objects."""
-    return list(_SITES.values())
+    """Return every Site derived from a verified CSV POI."""
+    return list(_verified_sites())
+
+
+def list_sites() -> list[str]:
+    """Return every registered site slug (POI id)."""
+    return [s.slug for s in _verified_sites()]
+
+
+def get_site(slug: str) -> Site:
+    """Look up a Site by slug (POI id). Raises KeyError if not found."""
+    for s in _verified_sites():
+        if s.slug == slug:
+            return s
+    raise KeyError(slug)
 
 
 # -- Coordinate verification --------------------------------------------------

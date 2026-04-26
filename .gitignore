@@ -13,6 +13,8 @@ data/icgc/
 data/sites/
 data/viewer/
 data/catalog/
+data/batimetria-*
+data/wreck_candidates.csv
 
 # IDE
 .idea/

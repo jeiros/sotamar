@@ -40,12 +40,15 @@ def _markers_for_site(site: Site) -> list[tuple[float, float, str]]:
     """Combine Site.markers with POIs from the CSV that fall in the window.
 
     POIs are loaded from data/dive_sites.csv if present (silently skipped if
-    not). Duplicates between manual Site.markers and POI catalogue are
-    de-duped by rounding coordinates to the nearest 10 m.
+    not). The POI whose id equals the site slug is dropped — the figure
+    already represents that POI, a self-marker is redundant. Remaining
+    duplicates between manual Site.markers and POI catalogue are de-duped
+    by rounding coordinates to the nearest 10 m.
     """
     markers = list(site.markers)
     if DEFAULT_POIS_CSV.exists():
-        in_window = pois_in_bounds(load_pois(), site.bounds)
+        in_window = [p for p in pois_in_bounds(load_pois(), site.bounds)
+                     if p.id != site.slug]
         markers += pois_to_markers(in_window)
     seen: set[tuple[int, int]] = set()
     unique: list[tuple[float, float, str]] = []
@@ -235,6 +238,92 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
 
     elapsed = time.time() - t_start
     click.echo(f"  Done in {elapsed:.1f}s → {output_dir}/")
+
+
+@cli.command("detect-wrecks")
+@click.option(
+    "--cog", type=click.Path(exists=True), default=None,
+    help="Path to the ICGC bathymetry COG.",
+)
+@click.option(
+    "--radius", type=int, default=1500,
+    help="Search radius in metres around each seed coord (default 1500).",
+)
+@click.option(
+    "-o", "--output", type=click.Path(file_okay=False), default="data",
+    help="Output base directory; CSV goes here, figures under data/sites/<id>/.",
+)
+@click.option(
+    "--all-wrecks", is_flag=True,
+    help="Also run detection on verified wreck POIs (sanity check).",
+)
+def detect_wrecks(cog, radius, output, all_wrecks):
+    """Scan bathymetry for wreck-shaped anomalies near unverified wreck POIs.
+
+    Iterates over every wreck POI in data/dive_sites.csv whose
+    coord_confidence is 'unverified', searches a `--radius`-metre window
+    around each approximate coord, and reports compact positive elevation
+    anomalies as wreck candidates. With --all-wrecks, also runs against
+    verified wrecks (useful for calibration).
+    """
+    import csv as _csv
+    from sotamar.pois import load_pois
+    from sotamar.wreck_detect import detect_wrecks_near, plot_wreck_candidates
+
+    cog_path = Path(cog) if cog else None
+    output_base = Path(output)
+    sites_dir = output_base / "sites"
+    csv_path = output_base / "wreck_candidates.csv"
+
+    confidences = (
+        ("verified", "unverified") if all_wrecks else ("unverified",)
+    )
+    targets = [
+        p for p in load_pois()
+        if p.site_type == "wreck" and p.coord_confidence in confidences
+    ]
+    if not targets:
+        click.echo("No wreck POIs match the filter.")
+        return
+
+    click.echo(f"Scanning {len(targets)} wreck POI(s) at radius {radius} m\n")
+    all_candidates: list = []
+    for poi in targets:
+        click.echo(f"=== {poi.name} ({poi.id}) [{poi.coord_confidence}] ===")
+        candidates, debug = detect_wrecks_near(
+            seed_lat=poi.latitude,
+            seed_lon=poi.longitude,
+            cog_path=cog_path,
+            search_radius_m=radius,
+            source_poi_id=poi.id,
+        )
+        click.echo(f"  {len(candidates)} candidate(s) above threshold")
+        for c in candidates[:3]:
+            click.echo(
+                f"    #{c.rank}  ({c.peak_lat:.5f},{c.peak_lon:.5f})  "
+                f"peak {c.peak_residual_m:+.2f} m  size {c.footprint_m2} m²  "
+                f"{c.length_m}×{c.width_m} m  plausibility {c.plausibility}"
+            )
+        plot_wreck_candidates(
+            candidates, debug,
+            sites_dir / poi.id / "wreck_candidates.png",
+            source_name=poi.name,
+            seed_lat=poi.latitude, seed_lon=poi.longitude,
+            radius_m=radius,
+        )
+        all_candidates.extend(candidates)
+
+    # Write the combined candidates CSV
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(all_candidates[0].asdict().keys()) if all_candidates \
+        else ["source_poi_id"]
+    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for c in all_candidates:
+            writer.writerow(c.asdict())
+    click.echo(f"\nWrote {len(all_candidates)} candidate(s) → {csv_path}")
+    click.echo(f"Figures → {sites_dir}/<poi_id>/wreck_candidates.png")
 
 
 @cli.command("check-coords")
