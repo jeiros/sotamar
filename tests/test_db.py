@@ -17,9 +17,11 @@ from sotamar.db import (
     site_bbox_utm_wkt,
     site_point_utm_wkt,
     upsert_dive_site,
+    upsert_pois,
     upsert_site_rasters,
     upsert_terrain_stats,
 )
+from sotamar.pois import POI
 
 
 # ---------------------------------------------------------------------------
@@ -254,3 +256,73 @@ class TestLoadAllSites:
         summary = load_all_sites(clean_db, sites_dir=tmp_path)
         assert summary.stats == 1
         assert first.slug in summary.sites_without_zones
+
+
+class TestUpsertPois:
+    """POI upsert + spatial linkage to parent dive_site analysis_bbox."""
+
+    def _poi(self, **kw) -> POI:
+        defaults = dict(
+            id="poi_test", name="Test POI", region="Test", municipality=None,
+            site_type="wreck", coord_confidence="verified",
+            depth_min_m=None, depth_max_m=None,
+            description=None, sources=None,
+        )
+        defaults.update(kw)
+        return POI(**defaults)  # type: ignore[arg-type]
+
+    def test_upsert_links_poi_to_containing_site(self, clean_db, sample_site):
+        """A POI inside the site's analysis_bbox should be linked via site_id."""
+        import sqlalchemy
+        # sample_site is at UTM 500000, 4600000 with half_size=50.
+        # Convert that UTM centre to lat/lon so the POI lands inside.
+        from pyproj import Transformer
+        t = Transformer.from_crs("EPSG:25831", "EPSG:4326", always_xy=True)
+        lon, lat = t.transform(500000, 4600000)
+        poi = self._poi(latitude=lat, longitude=lon)
+
+        with clean_db.begin() as conn:
+            site_id = upsert_dive_site(conn, sample_site)
+        with clean_db.begin() as conn:
+            assert upsert_pois(conn, [poi]) == 1
+        with clean_db.connect() as conn:
+            row = conn.execute(sqlalchemy.text(
+                "SELECT site_id FROM dive_site_pois WHERE id = :i"
+            ), {"i": "poi_test"}).one()
+        assert row.site_id == site_id
+
+    def test_poi_outside_any_window_has_null_site_id(self, clean_db, sample_site):
+        import sqlalchemy
+        # Distant POI (far from sample_site)
+        poi = self._poi(latitude=40.0, longitude=0.5)
+        with clean_db.begin() as conn:
+            upsert_dive_site(conn, sample_site)
+        with clean_db.begin() as conn:
+            upsert_pois(conn, [poi])
+        with clean_db.connect() as conn:
+            row = conn.execute(sqlalchemy.text(
+                "SELECT site_id FROM dive_site_pois WHERE id = :i"
+            ), {"i": "poi_test"}).one()
+        assert row.site_id is None
+
+    def test_upsert_is_idempotent(self, clean_db, sample_site):
+        import sqlalchemy
+        poi = self._poi(latitude=42.0, longitude=3.0)
+        with clean_db.begin() as conn:
+            upsert_dive_site(conn, sample_site)
+        with clean_db.begin() as conn:
+            upsert_pois(conn, [poi])
+        # Second upsert with mutated name should update, not duplicate
+        with clean_db.begin() as conn:
+            upsert_pois(conn, [self._poi(
+                latitude=42.0, longitude=3.0, name="Renamed",
+            )])
+        with clean_db.connect() as conn:
+            count = conn.execute(sqlalchemy.text(
+                "SELECT count(*) FROM dive_site_pois WHERE id = :i"
+            ), {"i": "poi_test"}).scalar_one()
+            name = conn.execute(sqlalchemy.text(
+                "SELECT name FROM dive_site_pois WHERE id = :i"
+            ), {"i": "poi_test"}).scalar_one()
+        assert count == 1
+        assert name == "Renamed"

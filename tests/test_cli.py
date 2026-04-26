@@ -300,3 +300,83 @@ class TestCheckCoordsCommand:
         result = runner.invoke(cli, ["check-coords"])
         assert result.exit_code == 0
         assert "ERROR" in result.output
+
+
+# -- _markers_for_site -------------------------------------------------------
+
+class TestMarkersForSite:
+    """Auto-marker integration: Site.markers ∪ POIs in window, deduped."""
+
+    @pytest.fixture
+    def site_with_marker(self):
+        from sotamar.sites import Site
+        return Site(
+            slug="test", name="Test", easting=510000, northing=4631400,
+            region="R", character="C", half_size=250,
+            markers=((510018, 4631388, "Manual"),),
+        )
+
+    def test_combines_manual_and_pois(self, site_with_marker):
+        from sotamar.cli import _markers_for_site
+        from sotamar.pois import POI
+
+        # POI inside the 500 m window, distinct from the manual marker
+        in_window = POI(
+            id="poi1", name="POI Inside", region="r", municipality=None,
+            site_type="rock", latitude=41.83432, longitude=3.12200,
+            coord_confidence="verified",
+            depth_min_m=None, depth_max_m=None,
+            description=None, sources=None,
+        )
+        # POI outside the window — should be excluded
+        outside = POI(
+            id="poi2", name="POI Outside", region="r", municipality=None,
+            site_type="rock", latitude=42.5, longitude=3.5,
+            coord_confidence="verified",
+            depth_min_m=None, depth_max_m=None,
+            description=None, sources=None,
+        )
+
+        with patch("sotamar.cli.load_pois", return_value=[in_window, outside]), \
+             patch("sotamar.cli.DEFAULT_POIS_CSV") as mock_path:
+            mock_path.exists.return_value = True
+            markers = _markers_for_site(site_with_marker)
+
+        labels = {label for _, _, label in markers}
+        assert "Manual" in labels
+        assert "POI Inside" in labels
+        assert "POI Outside" not in labels
+
+    def test_dedupes_overlapping_markers(self, site_with_marker):
+        """A POI within 10 m of a manual marker should not be drawn twice."""
+        from sotamar.cli import _markers_for_site
+        from sotamar.pois import POI
+
+        # POI at lat/lon that round-trips to UTM ~510018, 4631388 — same as
+        # the site_with_marker manual marker.
+        duplicate = POI(
+            id="dup", name="Duplicate of Manual",
+            region="r", municipality=None, site_type="wreck",
+            latitude=41.83432, longitude=3.12065,
+            coord_confidence="verified",
+            depth_min_m=None, depth_max_m=None,
+            description=None, sources=None,
+        )
+
+        with patch("sotamar.cli.load_pois", return_value=[duplicate]), \
+             patch("sotamar.cli.DEFAULT_POIS_CSV") as mock_path:
+            mock_path.exists.return_value = True
+            markers = _markers_for_site(site_with_marker)
+
+        # Only the manual marker survives the dedupe; the POI is dropped.
+        assert len(markers) == 1
+        assert markers[0][2] == "Manual"
+
+    def test_no_csv_returns_only_site_markers(self, site_with_marker):
+        from sotamar.cli import _markers_for_site
+
+        with patch("sotamar.cli.DEFAULT_POIS_CSV") as mock_path:
+            mock_path.exists.return_value = False
+            markers = _markers_for_site(site_with_marker)
+
+        assert markers == [(510018, 4631388, "Manual")]

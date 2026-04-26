@@ -157,8 +157,8 @@ def clean_db(db_engine):
     import sqlalchemy
     with db_engine.begin() as c:
         c.execute(sqlalchemy.text(
-            "TRUNCATE site_rasters, site_terrain_stats, dive_sites "
-            "RESTART IDENTITY CASCADE"
+            "TRUNCATE dive_site_pois, site_rasters, site_terrain_stats, "
+            "dive_sites RESTART IDENTITY CASCADE"
         ))
     yield db_engine
 

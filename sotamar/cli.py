@@ -26,8 +26,36 @@ from sotamar.terrain import (
 )
 from sotamar.profile import extract_depth_profile
 from sotamar.figures import plot_terrain_analysis, plot_depth_profile
+from sotamar.pois import (
+    DEFAULT_CSV_PATH as DEFAULT_POIS_CSV,
+    load_pois,
+    pois_in_bounds,
+    pois_to_markers,
+)
 
 DEFAULT_OUTPUT_BASE = Path("data/sites")
+
+
+def _markers_for_site(site: Site) -> list[tuple[float, float, str]]:
+    """Combine Site.markers with POIs from the CSV that fall in the window.
+
+    POIs are loaded from data/dive_sites.csv if present (silently skipped if
+    not). Duplicates between manual Site.markers and POI catalogue are
+    de-duped by rounding coordinates to the nearest 10 m.
+    """
+    markers = list(site.markers)
+    if DEFAULT_POIS_CSV.exists():
+        in_window = pois_in_bounds(load_pois(), site.bounds)
+        markers += pois_to_markers(in_window)
+    seen: set[tuple[int, int]] = set()
+    unique: list[tuple[float, float, str]] = []
+    for e, n, label in markers:
+        key = (round(e, -1), round(n, -1))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((e, n, label))
+    return unique
 
 
 @click.group()
@@ -193,14 +221,17 @@ def _analyze_site(site: Site, output_base: Path, cog_path: Path | None) -> None:
 
     # 7. Generate figures
     click.echo("  Generating terrain analysis figure...")
+    markers = _markers_for_site(site)
     plot_terrain_analysis(
         elevation, slope, bpi_fine, bpi_broad, vrm, depth_zones,
         site.bounds, site.name, output_dir,
-        markers=list(site.markers) or None,
+        markers=markers or None,
     )
 
     click.echo("  Generating depth profile figure...")
-    plot_depth_profile(distances, depths, site.name, output_dir)
+    wrote = plot_depth_profile(distances, depths, site.name, output_dir)
+    if not wrote:
+        click.echo("    (skipped: transect crosses only NoData/emerged terrain)")
 
     elapsed = time.time() - t_start
     click.echo(f"  Done in {elapsed:.1f}s → {output_dir}/")
@@ -260,7 +291,7 @@ def load_db(db_url, sites_dir, slugs):
     )
 
     click.echo(f"\nLoaded {summary.sites} sites, {summary.stats} stats rows, "
-               f"{summary.rasters} raster rows.")
+               f"{summary.rasters} raster rows, {summary.pois} POIs.")
     if summary.sites_without_zones:
         click.echo(
             f"  note: {len(summary.sites_without_zones)} site(s) loaded without "

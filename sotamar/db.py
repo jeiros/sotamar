@@ -28,6 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from sotamar.pois import POI
 from sotamar.sites import Site, all_sites
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,26 @@ site_rasters = Table(
            Geometry("POLYGON", srid=25831, spatial_index=False),
            nullable=False),
     UniqueConstraint("site_id", "layer_name"),
+)
+
+dive_site_pois = Table(
+    "dive_site_pois", metadata,
+    Column("id", Text, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("region", Text, nullable=False),
+    Column("municipality", Text),
+    Column("site_type", Text, nullable=False),
+    Column("geom",     Geometry("POINT", srid=4326,  spatial_index=False),
+           nullable=False),
+    Column("geom_utm", Geometry("POINT", srid=25831, spatial_index=False),
+           nullable=False),
+    Column("coord_confidence", Text, nullable=False),
+    Column("depth_min_m", Real),
+    Column("depth_max_m", Real),
+    Column("description", Text),
+    Column("sources", Text),
+    Column("site_id", Integer,
+           ForeignKey("dive_sites.id", ondelete="SET NULL")),
 )
 
 
@@ -232,6 +253,53 @@ def upsert_site_rasters(conn, site_id: int, site_dir: Path) -> list[str]:
     return registered
 
 
+# -- POI upsert ---------------------------------------------------------------
+
+def upsert_pois(conn, pois: list[POI]) -> int:
+    """Insert/update POIs and link each to the analysis window it falls into.
+
+    site_id is set to the dive_sites row whose analysis_bbox contains the
+    POI's geom_utm point, or NULL if the POI is outside every window.
+    Returns the number of POIs upserted.
+    """
+    for poi in pois:
+        point_4326 = f"POINT({poi.longitude} {poi.latitude})"
+        point_25831 = f"POINT({poi.easting} {poi.northing})"
+        # Resolve site_id via point-in-polygon against dive_sites.analysis_bbox
+        site_id_q = (
+            select(dive_sites.c.id)
+            .where(func.ST_Contains(
+                dive_sites.c.analysis_bbox,
+                func.ST_GeomFromText(point_25831, 25831),
+            ))
+            .limit(1)
+        )
+        site_id = conn.execute(site_id_q).scalar()
+
+        values = dict(
+            id=poi.id,
+            name=poi.name,
+            region=poi.region,
+            municipality=poi.municipality,
+            site_type=poi.site_type,
+            geom=func.ST_GeomFromText(point_4326, 4326),
+            geom_utm=func.ST_GeomFromText(point_25831, 25831),
+            coord_confidence=poi.coord_confidence,
+            depth_min_m=poi.depth_min_m,
+            depth_max_m=poi.depth_max_m,
+            description=poi.description,
+            sources=poi.sources,
+            site_id=site_id,
+        )
+        stmt = pg_insert(dive_site_pois).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["id"],
+            set_={k: stmt.excluded[k] for k in values if k != "id"},
+        )
+        conn.execute(stmt)
+    return len(pois)
+
+
 # -- Orchestration ------------------------------------------------------------
 
 @dataclass
@@ -239,6 +307,7 @@ class LoadSummary:
     sites: int = 0
     stats: int = 0
     rasters: int = 0
+    pois: int = 0
     skipped: list[tuple[str, str]] = field(default_factory=list)
     sites_without_zones: list[str] = field(default_factory=list)
 
@@ -248,12 +317,17 @@ def load_all_sites(
     sites_dir: Path = Path("data/sites"),
     slugs: list[str] | None = None,
     strict_stats: bool = False,
+    pois_csv: Path | None = None,
 ) -> LoadSummary:
     """Upsert every registered site plus its stats and raster layers.
 
     Each site runs in its own transaction, so one bad row doesn't roll back
-    the batch. Returns a summary dict.
+    the batch. If `pois_csv` is given (or `data/dive_sites.csv` exists),
+    POIs are loaded after sites and linked to their containing analysis
+    window via point-in-polygon. Returns a summary.
     """
+    from sotamar.pois import DEFAULT_CSV_PATH, load_pois
+
     summary = LoadSummary()
     for site in all_sites():
         if slugs is not None and site.slug not in slugs:
@@ -280,6 +354,19 @@ def load_all_sites(
         except Exception as exc:
             log.exception("Failed to load site %s", site.slug)
             summary.skipped.append((site.slug, str(exc)))
+
+    # POIs are loaded once after every site is in place so the
+    # point-in-polygon link to dive_sites.analysis_bbox sees fresh windows.
+    csv_path = pois_csv if pois_csv is not None else DEFAULT_CSV_PATH
+    if csv_path.exists():
+        try:
+            pois = load_pois(csv_path)
+            with engine.begin() as conn:
+                summary.pois = upsert_pois(conn, pois)
+        except Exception as exc:
+            log.exception("Failed to load POIs from %s", csv_path)
+            summary.skipped.append(("__pois__", str(exc)))
+
     return summary
 
 

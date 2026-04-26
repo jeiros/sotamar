@@ -91,3 +91,36 @@ CREATE TABLE IF NOT EXISTS site_rasters (
 
 CREATE INDEX IF NOT EXISTS site_rasters_bbox_gix ON site_rasters USING GIST (bbox);
 CREATE INDEX IF NOT EXISTS site_rasters_site_idx ON site_rasters (site_id);
+
+-- ---------------------------------------------------------------------------
+-- dive_site_pois: catalogue of named features (wrecks, pinnacles, coves,
+-- islets, etc.) sourced from data/dive_sites.csv. POIs are distinct from
+-- dive_sites: a single dive_site (analysis window) may contain dozens of
+-- POIs that get auto-overlaid on its terrain figures. site_id is a soft
+-- link populated by upsert_pois via point-in-polygon against analysis_bbox;
+-- NULL when the POI falls outside every analysis window.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dive_site_pois (
+    id                TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    region            TEXT NOT NULL,
+    municipality      TEXT,
+    site_type         TEXT NOT NULL,
+    geom              geometry(Point, 4326)  NOT NULL,
+    geom_utm          geometry(Point, 25831) NOT NULL,
+    coord_confidence  TEXT NOT NULL CHECK (coord_confidence IN
+                          ('verified', 'approximate', 'unverified')),
+    depth_min_m       REAL,
+    depth_max_m       REAL,
+    description       TEXT,
+    sources           TEXT,
+    site_id           INTEGER REFERENCES dive_sites(id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS dive_site_pois_geom_gix     ON dive_site_pois USING GIST (geom);
+CREATE INDEX IF NOT EXISTS dive_site_pois_geom_utm_gix ON dive_site_pois USING GIST (geom_utm);
+CREATE INDEX IF NOT EXISTS dive_site_pois_site_idx     ON dive_site_pois (site_id);
+CREATE INDEX IF NOT EXISTS dive_site_pois_region_idx   ON dive_site_pois (region);
+CREATE INDEX IF NOT EXISTS dive_site_pois_type_idx     ON dive_site_pois (site_type);

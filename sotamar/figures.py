@@ -148,8 +148,16 @@ def plot_depth_profile(
     depths: np.ndarray,
     site_name: str,
     output_dir: Path,
-) -> None:
-    """Depth profile with dive threshold annotations. Saves PNG + PDF."""
+) -> bool:
+    """Depth profile with dive threshold annotations. Saves PNG + PDF.
+
+    Returns True if a figure was written, False if the transect has no
+    valid depth data (all-NaN). Drawing the all-NaN case is skipped because
+    matplotlib's tight-bbox PNG backend hangs on undefined data limits.
+    """
+    if not np.isfinite(depths).any():
+        return False
+
     fig, ax = plt.subplots(figsize=(12, 5))
 
     ax.plot(distances, depths, "steelblue", linewidth=1.5)
@@ -174,6 +182,7 @@ def plot_depth_profile(
     fig.tight_layout()
     _save_figure(fig, "depth_profile", output_dir)
     plt.close(fig)
+    return True
 
 
 def _make_extent(bounds: tuple[float, float, float, float]) -> tuple[float, float, float, float]:

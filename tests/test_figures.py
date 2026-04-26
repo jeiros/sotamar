@@ -122,12 +122,14 @@ class TestPlotDepthProfile:
         assert (out / "depth_profile.png").stat().st_size > 1000
 
     def test_handles_all_nan_depths(self, tmp_path):
-        """Should not crash with entirely NaN depths."""
+        """Should silently skip when depths are entirely NaN."""
         distances = np.linspace(0, 100, 50)
         depths = np.full(50, np.nan)
         out = tmp_path / "nan_profile"
-        plot_depth_profile(distances, depths, "NaN", out)
-        assert (out / "depth_profile.png").exists()
+        wrote = plot_depth_profile(distances, depths, "NaN", out)
+        assert wrote is False
+        assert not (out / "depth_profile.png").exists()
+        assert not (out / "depth_profile.pdf").exists()
 
     def test_handles_partial_nan(self, tmp_path):
         distances = np.linspace(0, 200, 100)
