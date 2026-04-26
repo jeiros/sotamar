@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib.colors as mcolors
@@ -69,15 +69,47 @@ class MetricSpec:
     units: str          # tooltip units, "" if none
     precision: int      # decimal places in tooltip
     value_field: str    # key the tooltip references: "{depth}", "{slope}", …
+    caption: str = ""   # one-line explanation rendered under the tab bar
 
 
+# Tabs are ordered by usefulness for dive planning: the first three are
+# directly actionable; broad BPI helps identify wall vs slope; fine BPI and
+# VRM are scientific terrain-characterisation metrics most useful for the
+# thesis side rather than for a diver picking a site.
 METRICS: tuple[MetricSpec, ...] = (
-    MetricSpec("depth",     "Depth",     "bathymetry.tif", "viridis",   "depth",         " m", 2, "depth"),
-    MetricSpec("zone",      "Dive zone", None,             "",          "zone",          "",   0, "zone_label"),
-    MetricSpec("slope",     "Slope",     "slope.tif",      "YlOrRd",    "linear_p99",    "°",  1, "slope"),
-    MetricSpec("bpi_fine",  "Fine BPI",  "bpi_fine.tif",   "RdBu_r",    "symmetric_p99", "",   2, "bpi_fine"),
-    MetricSpec("bpi_broad", "Broad BPI", "bpi_broad.tif",  "RdBu_r",    "symmetric_p99", "",   2, "bpi_broad"),
-    MetricSpec("vrm",       "VRM",       "vrm.tif",        "inferno",   "linear_p99",    "",   4, "vrm"),
+    MetricSpec(
+        "depth", "Depth", "bathymetry.tif", "viridis", "depth", " m", 2, "depth",
+        caption="Seabed depth in metres. The first thing every diver looks at.",
+    ),
+    MetricSpec(
+        "zone", "Dive zone", None, "", "zone", "", 0, "zone_label",
+        caption="Recreational dive zones by depth: OWD / AOWD / Deep / Tech.",
+    ),
+    MetricSpec(
+        "slope", "Slope", "slope.tif", "YlOrRd", "linear_p99", "°", 1, "slope",
+        caption="Terrain steepness in degrees. Steep ≈ wall, gentle ≈ sloping reef.",
+    ),
+    MetricSpec(
+        "bpi_broad", "Broad BPI", "bpi_broad.tif", "RdBu_r", "symmetric_p99", "", 2, "bpi_broad",
+        caption=(
+            "Broad-scale Bathymetric Position Index (25–50 m). "
+            "Positive ≈ ridge or wall, negative ≈ basin or channel."
+        ),
+    ),
+    MetricSpec(
+        "bpi_fine", "Fine BPI", "bpi_fine.tif", "RdBu_r", "symmetric_p99", "", 2, "bpi_fine",
+        caption=(
+            "Fine-scale BPI (3–5 m). Highlights individual boulders, "
+            "outcrops and debris."
+        ),
+    ),
+    MetricSpec(
+        "vrm", "VRM", "vrm.tif", "inferno", "linear_p99", "", 4, "vrm",
+        caption=(
+            "Vector Ruggedness Measure (3×3). Seabed roughness "
+            "— high values flag complex 3-D habitat (good for marine life)."
+        ),
+    ),
 )
 
 METRICS_BY_SLUG = {m.slug: m for m in METRICS}
@@ -396,6 +428,23 @@ _SITE_STYLE = f"""
   #sotamar-tabs a.active {{
     color: #fff; border-bottom-color: #1f78b4; background: #0a3d62;
   }}
+  .metric-caption {{
+    background: #07304d; color: #b0c4de; padding: 6px 18px 8px 18px;
+    font-size: 12px; font-style: italic; border-top: 1px solid #0a3d62;
+  }}
+
+  #sotamar-scalebar {{
+    position: absolute; bottom: 14px; left: 14px; z-index: 10;
+    background: rgba(0,0,0,0.55); color: #fff; padding: 4px 8px 6px 8px;
+    border-radius: 4px; font: 11px system-ui, sans-serif;
+    pointer-events: none;
+  }}
+  #sotamar-scalebar .bar {{
+    height: 4px; background: #fff; margin-bottom: 3px;
+    border-left: 1px solid #fff; border-right: 1px solid #fff;
+    transition: width 0.1s linear;
+  }}
+  #sotamar-scalebar .label {{ text-align: center; }}
 
   #sotamar-legend {{
     position: absolute; top: 70px; left: 12px; z-index: 10;
@@ -438,12 +487,19 @@ _SITE_STYLE = f"""
 def _render_tab_bar(active_slug: str,
                     available_slugs: list[str]) -> str:
     parts = ['<div id="sotamar-tabs">']
+    active_caption = ""
     for m in METRICS:
         if m.slug not in available_slugs:
             continue
         cls = ' class="active"' if m.slug == active_slug else ""
         parts.append(f'<a href="{m.slug}.html"{cls}>{m.label}</a>')
+        if m.slug == active_slug:
+            active_caption = m.caption
     parts.append("</div>")
+    if active_caption:
+        parts.append(
+            f'<div class="metric-caption">{active_caption}</div>'
+        )
     return "".join(parts)
 
 
@@ -507,17 +563,81 @@ def _render_panels(stats: dict, figures_present: dict[str, bool]) -> str:
     return "".join(parts)
 
 
+_SCALEBAR_BODY = """
+<div id="sotamar-scalebar">
+  <div class="bar"></div>
+  <div class="label">— m</div>
+</div>
+"""
+
+# Suppress the browser context menu only on the WebGL canvas so right-click
+# drag can rotate the deck.gl camera without a context menu interrupting.
+# Pairs with the dynamic scale bar that reads deck.gl's current viewport.
+_SITE_CANVAS_SCRIPT = """
+<script>
+  (function () {
+    document.addEventListener('contextmenu', function (e) {
+      if (e.target && e.target.tagName === 'CANVAS') e.preventDefault();
+    });
+
+    var bar = document.getElementById('sotamar-scalebar');
+    if (!bar || typeof deckInstance === 'undefined') return;
+    var barEl = bar.querySelector('.bar');
+    var labelEl = bar.querySelector('.label');
+
+    function pickNiceLength(maxMeters) {
+      var candidates = [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+      for (var i = candidates.length - 1; i >= 0; i--) {
+        if (candidates[i] <= maxMeters) return candidates[i];
+      }
+      return candidates[0];
+    }
+
+    function update() {
+      try {
+        var vps = deckInstance.viewManager && deckInstance.viewManager.getViewports();
+        if (!vps || !vps[0]) return;
+        var vp = vps[0];
+        var mpp = vp.metersPerPixel;
+        if (typeof mpp !== 'number') {
+          // Fallback: Web Mercator approximation at the viewport latitude
+          var lat = (vp.latitude || 0) * Math.PI / 180;
+          mpp = 40075016.686 * Math.cos(lat) / Math.pow(2, vp.zoom + 8);
+        }
+        var targetPx = 120;
+        var nice = pickNiceLength(targetPx * mpp);
+        var widthPx = Math.max(20, nice / mpp);
+        barEl.style.width = widthPx + 'px';
+        labelEl.innerText = nice >= 1000 ? (nice / 1000) + ' km' : nice + ' m';
+      } catch (err) { /* swallow — bar just won't update this frame */ }
+    }
+
+    // Drive updates on every animation frame: cheap, and catches every
+    // viewstate change including user-driven pan/zoom/rotate.
+    function tick() { update(); requestAnimationFrame(tick); }
+    requestAnimationFrame(tick);
+  })();
+</script>
+"""
+
+
 def _inject_site_chrome(
     html_path: Path, active_slug: str, available_slugs: list[str],
     stats: dict, figures_present: dict[str, bool],
 ) -> None:
-    """Add tab bar, legend, styles, and bottom panels to a per-site HTML."""
+    """Add tab bar, legend, styles, scale bar, and bottom panels to a per-site HTML."""
     html = html_path.read_text()
     html = html.replace("</head>", f"{_SITE_STYLE}</head>")
     tabs = _render_tab_bar(active_slug, available_slugs)
     panels = _render_panels(stats, figures_present)
-    html = html.replace("<body>", f"<body>{tabs}{_LEGEND_BODY}")
-    html = html.replace("</body>", f"{panels}</body>")
+    html = html.replace(
+        "<body>",
+        f"<body>{tabs}{_LEGEND_BODY}{_SCALEBAR_BODY}",
+    )
+    html = html.replace(
+        "</body>",
+        f"{panels}{_SITE_CANVAS_SCRIPT}</body>",
+    )
     html_path.write_text(html)
 
 
@@ -527,7 +647,9 @@ def _inject_site_chrome(
 class ViewerSummary:
     overview: Path
     sites: list[tuple[str, Path, int]]  # (slug, directory, cell_count)
-    skipped: list[tuple[str, str]]
+    regions: list[tuple[str, Path, int]] = field(default_factory=list)
+    # (region_name, html_path, n_pois) for every regional page generated
+    skipped: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _copy_figure(src_dir: Path, dst_dir: Path, name: str) -> bool:
@@ -608,9 +730,236 @@ def write_site_pages(
     return site_out, cell_count
 
 
+def _read_region_bathymetry(
+    bounds: tuple[float, float, float, float],
+    cog_path: Path | None,
+    grid_size: int,
+) -> RasterWindow:
+    """Read a UTM bbox from the master COG, resampled to grid_size × grid_size."""
+    from sotamar.io import find_cog
+    cog = find_cog(cog_path)
+    left, bottom, right, top = bounds
+    with rasterio.open(cog) as src:
+        if src.crs is None or src.crs.to_epsg() != 25831:
+            raise ValueError(f"{cog}: expected EPSG:25831, got {src.crs}")
+        window = rasterio.windows.from_bounds(
+            left, bottom, right, top, transform=src.transform,
+        )
+        nodata = src.nodata
+        data = src.read(
+            1, window=window,
+            out_shape=(grid_size, grid_size),
+            resampling=Resampling.average,
+            boundless=True,
+            fill_value=nodata if nodata is not None else -9999.0,
+        ).astype(np.float64)
+    mask = np.zeros_like(data, dtype=bool)
+    if nodata is not None:
+        mask |= data == nodata
+    mask |= ~np.isfinite(data)
+    data[mask] = np.nan
+    return RasterWindow(arr=data, bounds=bounds, nodata_mask=mask)
+
+
+def _region_records(
+    bathy: RasterWindow, max_abs: float, region_pois: list[SiteRow],
+) -> list[dict]:
+    """Build GridCellLayer records for a regional bathymetry window.
+
+    Uses the depth metric; emerged cells (z > 0) are dropped.
+    """
+    spec = METRICS_BY_SLUG["depth"]
+    rgb = compute_colors(bathy.arr, spec)
+    grid_h, grid_w = bathy.arr.shape
+    left, bottom, right, top = bathy.bounds
+    dx = (right - left) / grid_w
+    dy = (top - bottom) / grid_h
+    records: list[dict] = []
+    for r in range(grid_h):
+        northing = top - (r + 0.5) * dy
+        for c in range(grid_w):
+            z = float(bathy.arr[r, c])
+            if not np.isfinite(z) or z > 0.0:
+                continue
+            easting = left + (c + 0.5) * dx
+            lon, lat = _utm_to_wgs84.transform(easting, northing)
+            records.append({
+                "lon": lon, "lat": lat,
+                "depth": round(z, 2),
+                "height_m": round(max_abs - abs(z), 2),
+                "color": [int(rgb[r, c, 0]), int(rgb[r, c, 1]),
+                          int(rgb[r, c, 2])],
+            })
+    return records
+
+
+def build_region_deck(
+    region_name: str,
+    pois: list[SiteRow],
+    bathy: RasterWindow,
+    cell_metres: float,
+) -> pdk.Deck:
+    """Regional 3D view: seabed surface + clickable POI pins."""
+    valid = bathy.arr[np.isfinite(bathy.arr) & (bathy.arr < 0)]
+    max_abs = float(np.abs(valid).max()) if valid.size else 1.0
+    records = _region_records(bathy, max_abs, pois)
+    if not records:
+        # Fall back to an "empty seabed" — still draw the pins.
+        records = []
+
+    cell_layer = pdk.Layer(
+        "GridCellLayer", data=records,
+        cell_size=cell_metres,
+        get_position=["lon", "lat"], get_elevation="height_m",
+        elevation_scale=VERTICAL_EXAGGERATION,
+        get_fill_color="color",
+        pickable=False, extruded=True,
+    )
+
+    pin_data = [
+        {
+            "lon": p.lon, "lat": p.lat, "name": p.name,
+            "color": _row_to_overview_record(p)["color"],
+            "href": f"../{p.slug}/depth.html",
+        }
+        for p in pois if p.lon and p.lat
+    ]
+    pin_layer = pdk.Layer(
+        "ScatterplotLayer", data=pin_data,
+        get_position=["lon", "lat"], get_fill_color="color",
+        get_radius=40, radius_min_pixels=6, radius_max_pixels=20,
+        pickable=True, stroked=True, get_line_color=[20, 20, 20],
+        line_width_min_pixels=2,
+    )
+    label_layer = pdk.Layer(
+        "TextLayer", data=pin_data,
+        get_position=["lon", "lat"], get_text="name",
+        get_color=[255, 255, 255],
+        get_size=12, get_pixel_offset=[10, -10],
+        get_alignment_baseline="'bottom'", billboard=True,
+    )
+
+    lons = [r["lon"] for r in pin_data]
+    lats = [r["lat"] for r in pin_data]
+    view = pdk.ViewState(
+        longitude=float(np.mean(lons)) if lons else 2.5,
+        latitude=float(np.mean(lats)) if lats else 41.5,
+        zoom=14, pitch=45, bearing=0,
+    )
+    tooltip = {
+        "html": "<b>{name}</b><br/><i style='color:#1f78b4;'>Click pin → site page</i>",
+        "style": {"backgroundColor": "white", "color": "#222",
+                  "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
+    }
+    return pdk.Deck(
+        layers=[cell_layer, pin_layer, label_layer], initial_view_state=view,
+        map_style=None, map_provider=None,  # pyright: ignore[reportArgumentType]
+        tooltip=tooltip,  # pyright: ignore[reportArgumentType]
+    )
+
+
+def _inject_region_chrome(html_path: Path, region_name: str, n_pois: int) -> None:
+    """Add scale bar, context-menu suppressor, click handler, and a back link."""
+    html = html_path.read_text()
+    if "deckInstance" not in html:
+        raise RuntimeError(
+            f"{html_path}: pydeck template no longer exposes 'deckInstance'"
+        )
+    header = (
+        '<div id="sotamar-region-header">'
+        f'<a href="../index.html">← Back to overview</a> · '
+        f'<b>{region_name}</b> &nbsp;<span class="meta">'
+        f'{n_pois} sites · click a pin to drill in</span>'
+        '</div>'
+    )
+    html = html.replace("</head>", f"{_SITE_STYLE}{_REGION_HEADER_CSS}</head>")
+    html = html.replace(
+        "<body>",
+        f"<body>{header}{_SCALEBAR_BODY}",
+    )
+    html = html.replace(
+        "</html>",
+        f"{_SITE_CANVAS_SCRIPT}{_OVERVIEW_CLICK_SCRIPT}</html>",
+    )
+    html_path.write_text(html)
+
+
+_REGION_HEADER_CSS = """
+<style>
+  #sotamar-region-header {
+    position: sticky; top: 0; z-index: 30;
+    background: #07304d; color: #cfd8dc;
+    padding: 8px 18px; font: 13px system-ui, sans-serif;
+    border-bottom: 1px solid #0a3d62;
+  }
+  #sotamar-region-header a { color: #aacfff; text-decoration: none; }
+  #sotamar-region-header a:hover { text-decoration: underline; }
+  #sotamar-region-header b { color: #fff; }
+  #sotamar-region-header .meta { color: #88a3bc; font-size: 12px; }
+</style>
+"""
+
+
+def write_region_pages(
+    rows: list[SiteRow], output_dir: Path,
+    cog_path: Path | None = None,
+    min_pois: int = 3, max_bbox_m: float = 4000,
+    grid_size: int = 200, margin_m: float = 200,
+) -> list[tuple[str, Path, int]]:
+    """For each CSV region with ≥min_pois sites within max_bbox_m, write a
+    regional 3D view with clickable POI pins.
+
+    Returns a list of (region_name, html_path, n_pois) for every region
+    page actually generated.
+    """
+    by_region: dict[str, list[SiteRow]] = {}
+    for row in rows:
+        if row.lon is None or row.lat is None:
+            continue
+        by_region.setdefault(row.region, []).append(row)
+
+    generated: list[tuple[str, Path, int]] = []
+    for region, pois in sorted(by_region.items()):
+        if len(pois) < min_pois:
+            continue
+        eastings = [p.easting for p in pois]
+        northings = [p.northing for p in pois]
+        left, right = min(eastings) - margin_m, max(eastings) + margin_m
+        bottom, top = min(northings) - margin_m, max(northings) + margin_m
+        width = right - left
+        height = top - bottom
+        if width > max_bbox_m or height > max_bbox_m:
+            log.info(
+                "Skipping region %s: bbox %.0fx%.0fm exceeds %.0fm limit",
+                region, width, height, max_bbox_m,
+            )
+            continue
+        try:
+            bathy = _read_region_bathymetry(
+                (left, bottom, right, top), cog_path, grid_size,
+            )
+        except Exception as exc:
+            log.warning("Skipping region %s: COG read failed (%s)", region, exc)
+            continue
+
+        cell_metres = max(width, height) / grid_size
+        deck = build_region_deck(region, pois, bathy, cell_metres)
+        region_dir = output_dir / region
+        region_dir.mkdir(parents=True, exist_ok=True)
+        html_path = region_dir / "index.html"
+        deck.to_html(
+            str(html_path), iframe_height=800, notebook_display=False,
+        )
+        _inject_region_chrome(html_path, region, len(pois))
+        generated.append((region, html_path, len(pois)))
+
+    return generated
+
+
 def write_viewer(
     rows: list[SiteRow], output_dir: Path, sites_dir: Path,
     grid_size: int = 100,
+    cog_path: Path | None = None,
 ) -> ViewerSummary:
     """Write the overview plus a multi-metric per-site page tree."""
     # Wipe previous output so nested vs flat layouts don't collide.
@@ -651,6 +1000,62 @@ def write_viewer(
         site_dir, cell_count = result
         sites_out.append((row.slug, site_dir, cell_count))
 
+    # Regional drill-down pages — one per CSV region whose POIs cluster
+    # tightly enough (≥3 POIs, bbox ≤4 km on each axis).
+    try:
+        regions_out = write_region_pages(
+            renderable, output_dir, cog_path=cog_path,
+        )
+    except Exception as exc:
+        log.exception("Region pages failed")
+        regions_out = []
+        skipped.append(("__regions__", str(exc)))
+
+    if regions_out:
+        _inject_overview_region_sidebar(overview_path, regions_out)
+
     return ViewerSummary(
-        overview=overview_path, sites=sites_out, skipped=skipped,
+        overview=overview_path, sites=sites_out, regions=regions_out,
+        skipped=skipped,
     )
+
+
+def _inject_overview_region_sidebar(
+    overview_path: Path, regions: list[tuple[str, Path, int]],
+) -> None:
+    """Append a small sidebar panel listing regional drill-down links."""
+    items = "".join(
+        f'<li><a href="{name}/index.html">{name.replace("_", " ").title()}'
+        f' <span class="count">({n})</span></a></li>'
+        for name, _, n in sorted(regions)
+    )
+    sidebar = (
+        '<div id="sotamar-regions">'
+        '<h4>Regional 3D views</h4>'
+        f'<ul>{items}</ul>'
+        '<div class="hint">Drill into a cluster of nearby dive sites.</div>'
+        '</div>'
+    )
+    css = """
+<style>
+  #sotamar-regions {
+    position: absolute; top: 12px; right: 12px; z-index: 15;
+    background: rgba(255,255,255,0.94); padding: 10px 14px;
+    border-radius: 6px; font: 13px system-ui, sans-serif; color: #222;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3); max-width: 240px;
+  }
+  #sotamar-regions h4 { margin: 0 0 6px 0; font-size: 13px; color: #07304d; }
+  #sotamar-regions ul { list-style: none; margin: 0; padding: 0; }
+  #sotamar-regions li { margin: 3px 0; }
+  #sotamar-regions a { color: #1f78b4; text-decoration: none; }
+  #sotamar-regions a:hover { text-decoration: underline; }
+  #sotamar-regions .count { color: #777; font-size: 11px; }
+  #sotamar-regions .hint {
+    margin-top: 8px; font-style: italic; color: #555; font-size: 11px;
+  }
+</style>
+"""
+    html = overview_path.read_text()
+    html = html.replace("</head>", f"{css}</head>")
+    html = html.replace("<body>", f"<body>{sidebar}")
+    overview_path.write_text(html)

@@ -459,7 +459,11 @@ def export_geojson(db_url, output, from_files, pretty):
     "--grid-size", type=int, default=100,
     help="Downsample grid per site (default 100×100 ≈ 20 m cells).",
 )
-def viewer(db_url, sites_dir, output, from_files, grid_size):
+@click.option(
+    "--cog", type=click.Path(exists=True), default=None,
+    help="Path to the ICGC bathymetry COG (used for regional pages).",
+)
+def viewer(db_url, sites_dir, output, from_files, grid_size, cog):
     """Generate a static HTML viewer: overview map + per-site 3D seabed."""
     from sotamar import db as dbmod
     from sotamar import viewer as viewermod
@@ -480,13 +484,15 @@ def viewer(db_url, sites_dir, output, from_files, grid_size):
 
     summary = viewermod.write_viewer(
         rows, output_dir=Path(output), sites_dir=Path(sites_dir),
-        grid_size=grid_size,
+        grid_size=grid_size, cog_path=Path(cog) if cog else None,
     )
 
     click.echo(f"Wrote overview → {summary.overview}")
     for slug, site_dir, cells in summary.sites:
         click.echo(f"Wrote {len(viewermod.METRICS)} metric views → "
                    f"{site_dir}/ ({cells} cells)")
+    for region, html_path, n in summary.regions:
+        click.echo(f"Wrote regional 3D view → {html_path} ({n} POIs)")
     if summary.skipped:
         click.echo(f"\n  skipped {len(summary.skipped)} site(s):")
         for slug, reason in summary.skipped:

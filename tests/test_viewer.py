@@ -73,13 +73,20 @@ class TestMetricsRegistry:
 
     def test_six_metrics_registered(self):
         assert len(METRICS) == 6
+        # Tabs ordered by dive utility: actionable metrics first
+        # (depth, zone, slope), broad BPI ahead of fine BPI (walls/
+        # terraces > boulder-scale for trip planning), VRM last.
         assert [m.slug for m in METRICS] == [
-            "depth", "zone", "slope", "bpi_fine", "bpi_broad", "vrm",
+            "depth", "zone", "slope", "bpi_broad", "bpi_fine", "vrm",
         ]
 
     def test_lookup_by_slug(self):
         assert METRICS_BY_SLUG["slope"].label == "Slope"
         assert METRICS_BY_SLUG["vrm"].cmap == "inferno"
+
+    def test_every_metric_has_caption(self):
+        for m in METRICS:
+            assert m.caption, f"{m.slug} missing caption"
 
 
 class TestZoneFromDepth:
@@ -319,6 +326,73 @@ class TestViewerCli:
         assert "deckInstance.setProps" in idx
         assert f'"href": "{first.slug}/depth.html"' in idx
 
+class TestRegionPages:
+    """Tests for write_region_pages — the regional drill-down view."""
+
+    def _make_pois(self, region: str, count: int, spread_m: float):
+        from pyproj import Transformer
+        rng = np.random.default_rng(42)
+        # Centre near Boreas seabed area but place pois on a grid in UTM
+        cx, cy = 510000.0, 4631400.0
+        rows: list[SiteRow] = []
+        for i in range(count):
+            angle = 2 * np.pi * i / count
+            e = cx + (spread_m / 2) * np.cos(angle)
+            n = cy + (spread_m / 2) * np.sin(angle)
+            lon, lat = Transformer.from_crs(
+                "EPSG:25831", "EPSG:4326", always_xy=True,
+            ).transform(e, n)
+            rows.append(SiteRow(
+                slug=f"{region}_p{i}", name=f"P{i}",
+                lon=lon, lat=lat, easting=e, northing=n,
+                region=region, character="t",
+                description=None, max_depth=None,
+                window_size=200, stats={}, rasters=[],
+            ))
+        return rows
+
+    def test_filters_small_regions(self, tmp_path):
+        from sotamar.viewer import write_region_pages
+        rows = self._make_pois("two_pois", 2, 200)
+        out = write_region_pages(rows, tmp_path, cog_path=None, min_pois=3)
+        assert out == []
+
+    def test_filters_oversized_bbox(self, tmp_path):
+        from sotamar.viewer import write_region_pages
+        rows = self._make_pois("sparse", 5, spread_m=8000)
+        out = write_region_pages(
+            rows, tmp_path, cog_path=None,
+            min_pois=3, max_bbox_m=4000,
+        )
+        # All 5 fit in a 5-region but bbox > 4 km → skipped
+        assert out == []
+
+    def test_generates_page_for_tight_cluster(self, tmp_path):
+        """COG must exist; this test reads from data/icgc/."""
+        from sotamar.viewer import write_region_pages
+        cog = Path("data/icgc/batimetria-v2r1-elevacions-2021-2025.tif")
+        if not cog.exists():
+            pytest.skip("ICGC COG not present; integration test only")
+        rows = self._make_pois("cluster", 4, spread_m=400)
+        out = write_region_pages(
+            rows, tmp_path, cog_path=cog,
+            min_pois=3, max_bbox_m=4000, grid_size=50,
+        )
+        assert len(out) == 1
+        region, html_path, n = out[0]
+        assert region == "cluster"
+        assert n == 4
+        assert html_path.exists()
+        # Chrome was injected.
+        html = html_path.read_text()
+        assert "sotamar-scalebar" in html
+        assert "sotamar-region-header" in html
+        assert "deckInstance.setProps" in html  # click handler
+        # Each pin's href points one level up.
+        assert '"href": "../cluster_p0/depth.html"' in html
+
+
+class TestViewerCliDb:
     def test_db_unreachable_fails_loudly(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(cli, [
