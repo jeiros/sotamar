@@ -126,14 +126,29 @@ def synthetic_cog(tmp_path, flat_surface):
 
 # -- DB fixtures (skip cleanly when PostGIS is not running) -------------------
 
+# Tests use a dedicated PostGIS instance on port 5433 (compose service
+# `postgis-test`) so they never truncate the production catalogue at 5432.
+# Override with SOTAMAR_TEST_DB_URL if you want to point at something else.
+TEST_DB_URL_DEFAULT = "postgresql+psycopg://sotamar:sotamar@localhost:5433/sotamar"
+
+
 @pytest.fixture(scope="session")
 def db_url():
-    """Return the PostGIS URL — env var wins, default points at compose."""
+    """Return the test PostGIS URL — SOTAMAR_TEST_DB_URL wins."""
     import os
-    return os.environ.get(
-        "SOTAMAR_DB_URL",
-        "postgresql+psycopg://sotamar:sotamar@localhost:5432/sotamar",
-    )
+    url = os.environ.get("SOTAMAR_TEST_DB_URL", TEST_DB_URL_DEFAULT)
+    # Belt-and-braces: refuse to truncate if the user accidentally points
+    # tests at the production cluster (port 5432). The compose file pins
+    # production to 5432 and tests to 5433.
+    if ":5432/" in url:
+        raise RuntimeError(
+            f"SOTAMAR_TEST_DB_URL appears to target port 5432 ({url!r}). "
+            "Tests truncate every catalogue table on each run; pointing "
+            "them at the production DB will wipe its data. Bring up the "
+            "`postgis-test` compose service (port 5433) instead, or set "
+            "SOTAMAR_TEST_DB_URL explicitly."
+        )
+    return url
 
 
 @pytest.fixture(scope="session")
@@ -146,14 +161,18 @@ def db_engine(db_url):
             c.execute(sqlalchemy.text("SELECT 1"))
             c.execute(sqlalchemy.text("SELECT PostGIS_Version()"))
     except Exception as exc:
-        pytest.skip(f"PostGIS not reachable at {db_url}: {exc}")
+        pytest.skip(f"Test PostGIS not reachable at {db_url}: {exc}")
     yield engine
     engine.dispose()
 
 
 @pytest.fixture
 def clean_db(db_engine):
-    """Truncate the three catalogue tables before each integration test."""
+    """Truncate the catalogue tables before each integration test.
+
+    Safe by construction: db_url() refuses to point at port 5432 so this
+    can never touch the production DB.
+    """
     import sqlalchemy
     with db_engine.begin() as c:
         c.execute(sqlalchemy.text(

@@ -35,12 +35,19 @@ uv sync
 ### 3. Bring up PostGIS
 
 ```bash
-docker compose up -d
+docker compose up -d                    # production at :5432, test at :5433
 docker compose exec postgis pg_isready -U sotamar -d sotamar
 ```
 
-The schema in `sql/schema.sql` auto-loads on first boot. Default
-credentials: `sotamar / sotamar` at `localhost:5432/sotamar`.
+Two PostGIS instances are defined in `docker-compose.yml`:
+
+- **`postgis`** on `localhost:5432` — your production data (DBeaver target).
+- **`postgis-test`** on `localhost:5433` — disposable instance used by the
+  pytest integration suite. Tests `TRUNCATE` the catalogue tables on every
+  run, so they need their own cluster to keep the production DB pristine.
+
+Both share the same `sql/schema.sql` (auto-loads on first boot) and the
+same default credentials: `sotamar / sotamar / sotamar`.
 
 ### 4. Run the terrain-analysis pipeline
 
@@ -189,11 +196,15 @@ docker compose up -d       # schema will auto-load
 ## Tests
 
 ```bash
+docker compose up -d postgis-test    # one-time: start the test PostGIS
 uv run pytest
 ```
 
-Integration tests that need PostGIS skip automatically if the service
-isn't reachable.
+Integration tests target `postgis-test` (port 5433); they skip silently
+if it isn't reachable. The `db_url` fixture in `tests/conftest.py`
+refuses to point at port 5432 so `TRUNCATE` can never hit production.
+Override with `SOTAMAR_TEST_DB_URL` if you want to run against a
+different test DB.
 
 ---
 

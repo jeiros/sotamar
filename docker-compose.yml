@@ -1,4 +1,7 @@
 # PostGIS for SotaMar — local TFG development.
+# Two cluster instances:
+#   `postgis`     — production data on port 5432  (your DBeaver target)
+#   `postgis-test` — disposable instance on 5433 used by pytest fixtures
 # Schema in ./sql/ is auto-applied on first cluster init only.
 # To re-apply after edits (idempotent):
 #   docker compose exec postgis psql -U sotamar -d sotamar \
@@ -23,5 +26,29 @@ services:
       timeout: 5s
       retries: 20
 
+  # Disposable instance for the pytest integration suite. Tests truncate
+  # the catalogue tables on every run and leave residual rows behind, so
+  # they need their own cluster to keep the production DB pristine.
+  # Same schema, same credentials, same DB name — only the port differs.
+  postgis-test:
+    image: postgis/postgis:16-3.4
+    container_name: sotamar-postgis-test
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: sotamar
+      POSTGRES_USER: sotamar
+      POSTGRES_PASSWORD: sotamar
+    volumes:
+      - sotamar_pgdata_test:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sotamar -d sotamar"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   sotamar_pgdata:
+  sotamar_pgdata_test:
