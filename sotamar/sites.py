@@ -5,6 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+# Default analysis-window half-size by feature type. The window edge length
+# is 2 × half_size in metres, so half_size=500 yields a 1×1 km window.
+# Tuned to a recreational dive's effective footprint (100–300 m radius)
+# while keeping ~50 m of edge context for the broad-BPI kernel.
+_HALF_SIZE_BY_TYPE = {
+    "wreck": 250, "pinnacle": 250, "rock": 250,
+    "cove": 500, "headland": 500, "wall": 500, "cave": 500,
+    "island": 1000,  # archipelagos / multi-feature areas
+}
+
+
 @dataclass(frozen=True)
 class Site:
     """A registered dive site with its extraction window parameters."""
@@ -15,7 +26,7 @@ class Site:
     northing: float
     region: str
     character: str
-    half_size: int = 1000
+    half_size: int = 500
     transect: tuple[tuple[float, float], tuple[float, float]] | None = None
     description: str | None = None
     max_depth: float | None = None
@@ -69,6 +80,7 @@ _register(Site(
     northing=4655100,
     region="Costa Brava",
     character="Island MPA, walls & tunnels",
+    half_size=1000,
     transect=((517500, 4655100), (519300, 4655100)),
 ))
 
@@ -79,6 +91,7 @@ _register(Site(
     northing=4634500,
     region="Costa Brava",
     character="Rocky islets, gentle shelf",
+    half_size=1000,
 ))
 
 _register(Site(
@@ -97,6 +110,7 @@ _register(Site(
     northing=4565300,
     region="Costa del Garraf",
     character="Smooth continental shelf",
+    half_size=1000,
 ))
 
 _register(Site(
@@ -106,6 +120,7 @@ _register(Site(
     northing=4547200,
     region="Costa Daurada",
     character="Rocky cape, moderate relief",
+    half_size=1000,
 ))
 
 # -- Session 2 additions: expanded catalogue ---------------------------------
@@ -119,6 +134,21 @@ _register(Site(
     northing=4688900,
     region="Costa Brava",
     character="Exposed granite headland, steep walls",
+    half_size=1000,
+))
+
+_register(Site(
+    slug="cap_norfeu",
+    name="Cap Norfeu",
+    easting=519000,
+    northing=4677400,
+    region="Costa Brava",
+    character="Dramatic headland between Roses and Cala Jòncols",
+    description=(
+        "Cap Norfeu at approximately 42.2472° N, 3.2335° E. Verified "
+        "headland with multiple dive sites on its flanks; used as a new "
+        "verified analysis window from the CSV catalogue."
+    ),
 ))
 
 _register(Site(
@@ -128,6 +158,7 @@ _register(Site(
     northing=4687200,
     region="Costa Brava",
     character="Offshore pinnacle, high relief",
+    half_size=250,
 ))
 
 _register(Site(
@@ -137,6 +168,7 @@ _register(Site(
     northing=4690100,
     region="Costa Brava",
     character="Small rocky islet, vertical relief",
+    half_size=250,
 ))
 
 _register(Site(
@@ -146,6 +178,7 @@ _register(Site(
     northing=4686600,
     region="Costa Brava",
     character="Twin rocks, swim-throughs",
+    half_size=250,
 ))
 
 _register(Site(
@@ -155,6 +188,7 @@ _register(Site(
     northing=4663400,
     region="Costa Brava",
     character="Sandy shelf near Greco-Roman ruins",
+    half_size=1000,
 ))
 
 _register(Site(
@@ -164,6 +198,7 @@ _register(Site(
     northing=4637100,
     region="Costa Brava",
     character="Three pinnacles off Llafranc",
+    half_size=250,
     description=(
         "Three submerged pinnacles (Ullastre I, II, III) at roughly 15–50 m "
         "depth off Llafranc. One of the best-known recreational dive sites "
@@ -179,6 +214,7 @@ _register(Site(
     northing=4637200,
     region="Costa Brava",
     character="Rocky coastal drop-off near Palamós",
+    half_size=250,
 ))
 
 _register(Site(
@@ -188,6 +224,7 @@ _register(Site(
     northing=4636000,
     region="Costa Brava",
     character="Rocky cape near Palamós, moderate relief",
+    half_size=1000,
 ))
 
 _register(Site(
@@ -197,6 +234,7 @@ _register(Site(
     northing=4631400,
     region="Costa Brava",
     character="40 m tugboat wreck, top ~22 m, seabed ~32 m, off Palamós",
+    half_size=250,
     description=(
         "Wreck of the Boreas (ex-Pellworm, 40 m deep-sea tugboat) at "
         "approximately 41.83432° N, 3.12065° E, resting on a sandy "
@@ -215,6 +253,7 @@ _register(Site(
     northing=4567700,
     region="Costa del Garraf",
     character="Karstic cliffs with freshwater seeps",
+    half_size=250,
     description=(
         "Submerged karstic spring in the Garraf massif where freshwater "
         "discharges into the Mediterranean through underwater cave systems."
@@ -237,6 +276,7 @@ _register(Site(
     northing=4552400,
     region="Costa Daurada",
     character="Artificial reef; bathymetry-gap case study",
+    half_size=250,
     description=(
         "Artificial reef module near Torredembarra at approximately "
         "41.130° N, 1.430° E. Used as a case study of structures absent "
@@ -252,6 +292,7 @@ _register(Site(
     northing=4531800,
     region="Costa Daurada",
     character="Rocky coastline with caves, near Ebre delta",
+    half_size=1000,
 ))
 
 

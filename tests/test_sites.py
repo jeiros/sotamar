@@ -32,10 +32,11 @@ class TestSiteDataclass:
             region="R", character="C",
         )
         left, bottom, right, top = site.bounds
-        assert left == 499000
-        assert bottom == 4599000
-        assert right == 501000
-        assert top == 4601000
+        # Default half_size=500 → 1×1 km window
+        assert left == 499500
+        assert bottom == 4599500
+        assert right == 500500
+        assert top == 4600500
 
     def test_bounds_custom_half_size(self):
         site = Site(
@@ -80,7 +81,7 @@ class TestSiteDataclass:
             slug="a", name="A", easting=0, northing=0,
             region="R", character="C",
         )
-        assert site.half_size == 1000
+        assert site.half_size == 500
         assert site.transect is None
 
 
@@ -150,11 +151,36 @@ class TestKnownSites:
                 # Should be E-W through center
                 assert start[1] == end[1] == site.northing
 
-    def test_bounds_produce_2km_window(self):
+    def test_window_size_policy(self):
+        """Half-sizes follow the documented per-site policy."""
+        compact = {
+            "boreas", "ullastres", "els_canyers", "garraf_falconera",
+            "el_gat", "els_farallons", "massa_dor", "el_biotop_torredembarra",
+        }
+        extended = {
+            "illes_medes", "cap_de_creus", "illes_formigues", "cap_de_planes",
+            "lescala_empuries", "costa_del_garraf", "cap_de_salou",
+            "lametlla_de_mar",
+        }
+        for site in all_sites():
+            if site.slug in compact:
+                assert site.half_size == 250, (
+                    f"{site.slug}: compact features should be half_size=250"
+                )
+            elif site.slug in extended:
+                assert site.half_size == 1000, (
+                    f"{site.slug}: extended features should be half_size=1000"
+                )
+            else:
+                assert site.half_size == 500, (
+                    f"{site.slug}: default half_size should be 500"
+                )
+
+    def test_bounds_window_size_matches_half_size(self):
         for site in all_sites():
             left, bottom, right, top = site.bounds
-            assert right - left == 2000
-            assert top - bottom == 2000
+            assert right - left == 2 * site.half_size
+            assert top - bottom == 2 * site.half_size
 
 
 # -- Coordinate verification (mocked) ----------------------------------------
