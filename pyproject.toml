@@ -23,7 +23,10 @@ dependencies = [
 sotamar = "sotamar.cli:cli"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "basedpyright>=1.39.6",
+    "pytest>=8.0",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,7 +1,7 @@
 """Static HTML viewer: overview map + per-site 3D seabed via pydeck/deck.gl.
 
 v2: per-site pages are a tabbed multi-metric view. Each tab (Depth, Dive
-zone, Slope, Fine BPI, Broad BPI, VRM) re-colours the same 3D
+zone, Slope, Broad BPI, Fine BPI, VRM) re-colours the same 3D
 GridCellLayer surface using the matching raster and a matplotlib
 colormap. Beneath the 3D view, the pre-rendered terrain_analysis.png
 figure, depth_profile.png, and a stats table make the full analytical
@@ -20,6 +20,7 @@ from matplotlib import colormaps
 import numpy as np
 import pydeck as pdk
 import rasterio
+import rasterio.windows
 from pyproj import Transformer
 from rasterio.enums import Resampling
 
@@ -839,8 +840,8 @@ def build_region_deck(
         get_alignment_baseline="'bottom'", billboard=True,
     )
 
-    lons = [r["lon"] for r in pin_data]
-    lats = [r["lat"] for r in pin_data]
+    lons = [float(r["lon"]) for r in pin_data]
+    lats = [float(r["lat"]) for r in pin_data]
     view = pdk.ViewState(
         longitude=float(np.mean(lons)) if lons else 2.5,
         latitude=float(np.mean(lats)) if lats else 41.5,

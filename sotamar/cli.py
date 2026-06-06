@@ -50,7 +50,7 @@ def _markers_for_site(site: Site) -> list[tuple[float, float, str]]:
         in_window = [p for p in pois_in_bounds(load_pois(), site.bounds)
                      if p.id != site.slug]
         markers += pois_to_markers(in_window)
-    seen: set[tuple[int, int]] = set()
+    seen: set[tuple[float, float]] = set()
     unique: list[tuple[float, float, str]] = []
     for e, n, label in markers:
         key = (round(e, -1), round(n, -1))
@@ -491,7 +491,7 @@ def viewer(db_url, sites_dir, output, from_files, grid_size, cog):
     for slug, site_dir, cells in summary.sites:
         click.echo(f"Wrote {len(viewermod.METRICS)} metric views → "
                    f"{site_dir}/ ({cells} cells)")
-    for region, html_path, n in summary.regions:
+    for _region, html_path, n in summary.regions:
         click.echo(f"Wrote regional 3D view → {html_path} ({n} POIs)")
     if summary.skipped:
         click.echo(f"\n  skipped {len(summary.skipped)} site(s):")

@@ -2,9 +2,10 @@
 anomalies likely to be sunken vessels.
 
 The methodology was first applied successfully to the Boreas wreck during
-the project's coordinate-verification work — a ~6 m hull rise above a
-~21 m sandy seabed produced a clean +4 m residual against a 301 m
-low-pass-smoothed background. This module generalises that procedure for
+the project's coordinate-verification work — the hull, rising from an
+otherwise smooth ~22 m sandy seabed, produced a clean ~4 m residual
+(slightly below the raw relief, since the 301 m low-pass background
+absorbs part of the anomaly's base). This module generalises that procedure for
 the Costa Daurada wrecks whose exact GPS coordinates are deliberately
 withheld to protect the dive sites.
 
@@ -14,18 +15,19 @@ Algorithm (per call to `detect_wrecks_near`):
    the seed lat/lon.
 2. Smooth with a 301 m uniform-box low-pass — preserves features ≤150 m.
 3. Residual = bathymetry − smoothed.
-4. Mask: residual ≥ `min_height_m` AND bathymetry ≤ −3 m (submerged).
+4. Mask: residual ≥ `min_height_m` AND bathymetry < −3 m (submerged).
 5. Connected-component labelling.
 6. Per blob: footprint, peak residual, bounding-box length/width, elongation.
-7. Filter to plausibility window: 10–2000 m², peak ≥ 0.5 m, elongation < 8.
+7. Filter to plausibility window: 10–2000 m², peak ≥ 0.5 m, elongation ≤ 8.
 8. Sort descending by peak_residual × log10(footprint + 10).
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import rasterio
@@ -113,7 +115,7 @@ def detect_wrecks_near(
         & (residual >= min_height_m)
         & (bathy_clean < -3)
     )
-    labels, n_blobs = label(candidate_mask)
+    labels, n_blobs = cast(tuple[np.ndarray, int], label(candidate_mask))
 
     candidates: list[WreckCandidate] = []
     for blob_id in range(1, n_blobs + 1):
@@ -157,10 +159,7 @@ def detect_wrecks_near(
         ))
 
     candidates.sort(key=lambda c: -c.plausibility)
-    candidates = [
-        WreckCandidate(**{**c.asdict(), "rank": i + 1})
-        for i, c in enumerate(candidates)
-    ]
+    candidates = [replace(c, rank=i + 1) for i, c in enumerate(candidates)]
 
     extent = (
         float(seed_e - search_radius_m), float(seed_e + search_radius_m),
