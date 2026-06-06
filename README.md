@@ -53,7 +53,7 @@ same default credentials: `sotamar / sotamar / sotamar`.
 
 The site registry is CSV-driven: every verified POI in
 `data/dive_sites.csv` becomes an analysis site at runtime
-(currently 52 verified sites across 8 regions). Site slugs equal
+(currently 52 verified sites across 9 regions). Site slugs equal
 POI ids — e.g. `med_meda_gran`, `pal_boreas`, `cdc_cap_creus`.
 
 ```bash
@@ -140,7 +140,7 @@ data/viewer/
 
 Each per-site page is a **tabbed multi-metric view**:
 
-- The top tab bar (`Depth · Zone · Slope · Fine BPI · Broad BPI · VRM`)
+- The top tab bar (`Depth · Zone · Slope · Broad BPI · Fine BPI · VRM`)
   re-colours the same 3D `GridCellLayer` surface using the matching
   raster and a matplotlib colormap aligned with the static thesis
   figures. Geometry (cell positions, heights) is shared across tabs so
