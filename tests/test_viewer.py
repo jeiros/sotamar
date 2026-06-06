@@ -175,7 +175,9 @@ class TestDeckBuilders:
         deck = build_overview_deck(rows)
         assert "ScatterplotLayer" in [l.type for l in deck.layers]
 
-    def test_site_has_gridcell_and_text(self, tmp_path):
+    def test_site_has_gridcell_and_no_text_label(self, tmp_path):
+        """The site name lives in the tab bar; an in-canvas TextLayer
+        clips through the extruded terrain and must not come back."""
         bathy = np.full((50, 50), -22.0, dtype=np.float32)
         bt = _make_tif(tmp_path / "bathy.tif", bathy)
         bw = downsample_raster(bt, grid_size=10)
@@ -186,7 +188,24 @@ class TestDeckBuilders:
         )
         types = [l.type for l in deck.layers]
         assert "GridCellLayer" in types
-        assert "TextLayer" in types
+        assert "TextLayer" not in types
+
+    def test_site_deck_zoom_frames_window(self, tmp_path):
+        """Initial zoom follows window size: a 150 m wreck window must
+        open closer than a 1000 m headland window, both within bounds."""
+        from dataclasses import replace
+        bathy = np.full((50, 50), -22.0, dtype=np.float32)
+        bt = _make_tif(tmp_path / "bathy.tif", bathy)
+        bw = downsample_raster(bt, grid_size=10)
+        recs = build_records(bw, None, METRICS_BY_SLUG["depth"])
+        spec = METRICS_BY_SLUG["depth"]
+
+        wreck = replace(_site_row(), window_size=150)
+        headland = replace(_site_row(), window_size=1000)
+        zoom_wreck = build_site_deck(wreck, recs, 1.5, spec).initial_view_state.zoom
+        zoom_head = build_site_deck(headland, recs, 10.0, spec).initial_view_state.zoom
+        assert zoom_wreck > zoom_head
+        assert 13.0 <= zoom_head < zoom_wreck <= 17.5
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +282,64 @@ class TestWriteSitePages:
             html = (out_dir / "test_site" / f"{m.slug}.html").read_text()
             active_anchor = f'<a href="{m.slug}.html" class="active">'
             assert active_anchor in html, f"{m.slug}.html missing active tab"
+
+    def test_legend_matches_metric(self, synthetic_site, tmp_path):
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+
+        zone_html = (out_dir / "test_site" / "zone.html").read_text()
+        assert "Dive zone (by depth)" in zone_html
+
+        depth_html = (out_dir / "test_site" / "depth.html").read_text()
+        assert "linear-gradient" in depth_html
+        assert "Dive zone (by depth)" not in depth_html
+
+        bpi_html = (out_dir / "test_site" / "bpi_broad.html").read_text()
+        assert "linear-gradient" in bpi_html
+        assert "<h4>Broad BPI</h4>" in bpi_html
+
+    def test_back_link_to_overview(self, synthetic_site, tmp_path):
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+        html = (out_dir / "test_site" / "depth.html").read_text()
+        assert '<a class="back" href="../index.html">' in html
+        assert '<span class="site">Test Site</span>' in html
+        assert "<title>Test Site — SotAMar</title>" in html
+
+    def test_camera_script_runs_after_deck_creation(
+        self, synthetic_site, tmp_path,
+    ):
+        """The camera/scale-bar scripts guard on `typeof deckInstance`,
+        so they must be injected after pydeck's own script (which the
+        template places between </body> and </html>) or they no-op."""
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+        html = (out_dir / "test_site" / "depth.html").read_text()
+        deck_pos = html.index("const deckInstance")
+        assert html.index("onViewStateChange") > deck_pos
+        assert html.index("sotamar-camera:") > deck_pos
+        assert html.index("pickNiceLength") > deck_pos  # scale bar too
+
+    def test_wheel_gate_present(self, synthetic_site, tmp_path):
+        """Plain wheel must scroll the page (panels below the deck stay
+        reachable); only Ctrl/⌘+wheel zooms the 3D view."""
+        row = _site_row("test_site", 500050, 4600050)
+        out_dir = tmp_path / "viewer"
+        out_dir.mkdir()
+        write_site_pages(row, synthetic_site, out_dir, grid_size=10)
+        html = (out_dir / "test_site" / "depth.html").read_text()
+        assert "sotamar-scroll-hint" in html
+        assert "e.stopPropagation()" in html
+        # Must override pydeck's body{overflow:hidden}, and must come
+        # after it in <head> so it wins by source order.
+        assert "overflow-y: auto" in html
+        assert html.index("overflow-y: auto") > html.index("overflow: hidden")
 
     def test_copies_figures(self, synthetic_site, tmp_path):
         row = _site_row("test_site", 500050, 4600050)
@@ -390,6 +467,8 @@ class TestRegionPages:
         assert "deckInstance.setProps" in html  # click handler
         # Each pin's href points one level up.
         assert '"href": "../cluster_p0/depth.html"' in html
+        # Pins are 3D beacons (needle + billboarded head), not flat dots.
+        assert "ColumnLayer" in html
 
 
 class TestViewerCliDb:

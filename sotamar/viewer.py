@@ -6,21 +6,30 @@ GridCellLayer surface using the matching raster and a matplotlib
 colormap. Beneath the 3D view, the pre-rendered terrain_analysis.png
 figure, depth_profile.png, and a stats table make the full analytical
 output visible without interaction.
+
+Each tab is a separate static page. A small script mirrors the deck.gl
+camera into sessionStorage so the orientation survives tab switches, each
+page carries a legend matched to its own metric, and the tab bar links
+back to the overview map. A plain mouse wheel scrolls the page (so the
+stats and figures below the deck stay reachable); Ctrl/⌘ + wheel zooms
+the 3D view.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 from dataclasses import dataclass, field
+from html import escape
 from pathlib import Path
 
 import matplotlib.colors as mcolors
-from matplotlib import colormaps
 import numpy as np
 import pydeck as pdk
 import rasterio
 import rasterio.windows
+from matplotlib import colormaps
 from pyproj import Transformer
 from rasterio.enums import Resampling
 
@@ -57,20 +66,38 @@ def _hex_to_rgb(color: str) -> list[int]:
 
 ZONE_RGB = [_hex_to_rgb(c) for c in ZONE_COLORS]
 
+# deck.gl's TextLayer builds its glyph atlas from an ASCII-only default
+# character set, so Catalan site names (Tascó, Dofí, …) render with holes.
+# pydeck runs every string prop through @deck.gl/json's expression parser,
+# which chokes on bare `'`, `(`, `"`… — both as array elements and inside
+# unquoted strings. The one shape that survives is pydeck's string-literal
+# convention (same as get_alignment_baseline="'bottom'"): a single
+# '…'-quoted string, which TextLayer then consumes as an iterable of
+# characters. It cannot contain a straight quote, so labels render
+# apostrophes with the typographic ’ (see build_region_deck).
+_LABEL_CHARSET = (
+    "' abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789"
+    "’-–—(),.&/·º"
+    "àáèéíïòóúüçÀÈÉÍÒÓÚÇŀ'"
+)
+
 
 # -- Metric registry ----------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class MetricSpec:
-    slug: str           # URL/filename key ("depth", "slope", "bpi_fine", …)
-    label: str          # tab button text
+    slug: str  # URL/filename key ("depth", "slope", "bpi_fine", …)
+    label: str  # tab button text
     raster: str | None  # filename under data/sites/{slug}/, or None (derived)
-    cmap: str           # matplotlib colormap
-    norm: str           # "depth" | "zone" | "symmetric_p99" | "linear_p99"
-    units: str          # tooltip units, "" if none
-    precision: int      # decimal places in tooltip
-    value_field: str    # key the tooltip references: "{depth}", "{slope}", …
-    caption: str = ""   # one-line explanation rendered under the tab bar
+    cmap: str  # matplotlib colormap
+    norm: str  # "depth" | "zone" | "symmetric_p99" | "linear_p99"
+    units: str  # tooltip units, "" if none
+    precision: int  # decimal places in tooltip
+    value_field: str  # key the tooltip references: "{depth}", "{slope}", …
+    caption: str = ""  # one-line explanation rendered under the tab bar
 
 
 # Tabs are ordered by usefulness for dive planning: the first three are
@@ -79,36 +106,78 @@ class MetricSpec:
 # thesis side rather than for a diver picking a site.
 METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
-        "depth", "Depth", "bathymetry.tif", "viridis", "depth", " m", 2, "depth",
+        "depth",
+        "Depth",
+        "bathymetry.tif",
+        "viridis",
+        "depth",
+        " m",
+        2,
+        "depth",
         caption="Seabed depth in metres. The first thing every diver looks at.",
     ),
     MetricSpec(
-        "zone", "Dive zone", None, "", "zone", "", 0, "zone_label",
+        "zone",
+        "Dive zone",
+        None,
+        "",
+        "zone",
+        "",
+        0,
+        "zone_label",
         caption="Recreational dive zones by depth: OWD / AOWD / Deep / Tech.",
     ),
     MetricSpec(
-        "slope", "Slope", "slope.tif", "YlOrRd", "linear_p99", "°", 1, "slope",
+        "slope",
+        "Slope",
+        "slope.tif",
+        "YlOrRd",
+        "linear_p99",
+        "°",
+        1,
+        "slope",
         caption="Terrain steepness in degrees. Steep ≈ wall, gentle ≈ sloping reef.",
     ),
     MetricSpec(
-        "bpi_broad", "Broad BPI", "bpi_broad.tif", "RdBu_r", "symmetric_p99", "", 2, "bpi_broad",
+        "bpi_broad",
+        "Broad BPI",
+        "bpi_broad.tif",
+        "RdBu_r",
+        "symmetric_p99",
+        "",
+        2,
+        "bpi_broad",
         caption=(
             "Broad-scale Bathymetric Position Index (25–50 m). "
             "Positive ≈ ridge or wall, negative ≈ basin or channel."
         ),
     ),
     MetricSpec(
-        "bpi_fine", "Fine BPI", "bpi_fine.tif", "RdBu_r", "symmetric_p99", "", 2, "bpi_fine",
+        "bpi_fine",
+        "Fine BPI",
+        "bpi_fine.tif",
+        "RdBu_r",
+        "symmetric_p99",
+        "",
+        2,
+        "bpi_fine",
         caption=(
             "Fine-scale BPI (3–5 m). Highlights individual boulders, "
             "outcrops and debris."
         ),
     ),
     MetricSpec(
-        "vrm", "VRM", "vrm.tif", "inferno", "linear_p99", "", 4, "vrm",
+        "vrm",
+        "VRM",
+        "vrm.tif",
+        "inferno",
+        "linear_p99",
+        "",
+        4,
+        "vrm",
         caption=(
-            "Vector Ruggedness Measure (3×3). Seabed roughness "
-            "— high values flag complex 3-D habitat (good for marine life)."
+            "Vector Ruggedness Measure (3×3). Seabed roughness independent of slope "
+            "— high values  mark structurally complex terrain (which is a recognised proxy for richer habitat.)."
         ),
     ),
 )
@@ -117,6 +186,7 @@ METRICS_BY_SLUG = {m.slug: m for m in METRICS}
 
 
 # -- Zone helpers -------------------------------------------------------------
+
 
 def _zone_from_depth(depth: float) -> int:
     """Map a depth in metres to a 1..4 zone (matches terrain.compute_depth_zones)."""
@@ -139,6 +209,7 @@ def _dominant_zone(stats: dict) -> int:
 
 # -- Raster I/O ---------------------------------------------------------------
 
+
 @dataclass
 class RasterWindow:
     arr: np.ndarray
@@ -153,7 +224,8 @@ def downsample_raster(tif_path: Path, grid_size: int) -> RasterWindow:
             raise ValueError(f"{tif_path}: expected EPSG:25831, got {src.crs}")
         nodata = src.nodata
         data = src.read(
-            1, out_shape=(grid_size, grid_size),
+            1,
+            out_shape=(grid_size, grid_size),
             resampling=Resampling.average,
         ).astype(np.float64)
         b = src.bounds
@@ -162,11 +234,13 @@ def downsample_raster(tif_path: Path, grid_size: int) -> RasterWindow:
         mask |= data == nodata
     mask |= ~np.isfinite(data)
     data[mask] = np.nan
-    return RasterWindow(arr=data, bounds=(b.left, b.bottom, b.right, b.top),
-                        nodata_mask=mask)
+    return RasterWindow(
+        arr=data, bounds=(b.left, b.bottom, b.right, b.top), nodata_mask=mask
+    )
 
 
 # -- Colour mapping -----------------------------------------------------------
+
 
 def _normaliser(spec: MetricSpec, arr: np.ndarray):
     """Build a matplotlib Normalize object appropriate for the metric."""
@@ -188,8 +262,9 @@ def _normaliser(spec: MetricSpec, arr: np.ndarray):
     raise ValueError(f"unknown norm: {spec.norm!r}")
 
 
-def compute_colors(arr: np.ndarray, spec: MetricSpec,
-                   bathy: np.ndarray | None = None) -> np.ndarray:
+def compute_colors(
+    arr: np.ndarray, spec: MetricSpec, bathy: np.ndarray | None = None
+) -> np.ndarray:
     """Map a 2D value array to a 2D RGB uint8 array via the metric's cmap.
 
     For the discrete zone metric, look up ZONE_RGB by depth-derived zone.
@@ -201,7 +276,8 @@ def compute_colors(arr: np.ndarray, spec: MetricSpec,
             np.isfinite(bathy),
             np.select(
                 [bathy <= -40.0, bathy <= -30.0, bathy <= -18.0, bathy <= 0.0],
-                [4, 3, 2, 1], default=0,
+                [4, 3, 2, 1],
+                default=0,
             ),
             0,
         )
@@ -218,9 +294,10 @@ def compute_colors(arr: np.ndarray, spec: MetricSpec,
 
 # -- Record construction ------------------------------------------------------
 
-def build_records(bathy_window: RasterWindow,
-                  metric_window: RasterWindow | None,
-                  spec: MetricSpec) -> list[dict]:
+
+def build_records(
+    bathy_window: RasterWindow, metric_window: RasterWindow | None, spec: MetricSpec
+) -> list[dict]:
     """Per-cell records in WGS84 with geometry from bathymetry and colour
     from the metric. NoData/emerged cells are dropped so the surface has
     the same holes across every metric.
@@ -230,8 +307,11 @@ def build_records(bathy_window: RasterWindow,
     dx = (right - left) / grid_size
     dy = (top - bottom) / grid_size
 
-    max_abs = float(np.nanmax(np.abs(bathy_window.arr[bathy_window.arr < 0]))) \
-        if np.any(bathy_window.arr < 0) else 0.0
+    max_abs = (
+        float(np.nanmax(np.abs(bathy_window.arr[bathy_window.arr < 0])))
+        if np.any(bathy_window.arr < 0)
+        else 0.0
+    )
 
     if spec.norm == "zone":
         rgb = compute_colors(bathy_window.arr, spec, bathy=bathy_window.arr)
@@ -262,11 +342,13 @@ def build_records(bathy_window: RasterWindow,
                 mv_str = f"{round(mv, spec.precision)}"
 
             rec = {
-                "lon": lon, "lat": lat, "height_m": height_m,
+                "lon": lon,
+                "lat": lat,
+                "height_m": height_m,
                 "depth": round(z, 2),
-                "zone": zone, "zone_label": ZONE_LABEL_BY_NUM[zone],
-                "color": [int(rgb[r, c, 0]), int(rgb[r, c, 1]),
-                          int(rgb[r, c, 2])],
+                "zone": zone,
+                "zone_label": ZONE_LABEL_BY_NUM[zone],
+                "color": [int(rgb[r, c, 0]), int(rgb[r, c, 1]), int(rgb[r, c, 2])],
             }
             # Metric-specific value field so the tooltip template resolves.
             if spec.value_field not in ("depth", "zone_label"):
@@ -277,13 +359,19 @@ def build_records(bathy_window: RasterWindow,
 
 # -- Overview -----------------------------------------------------------------
 
+
 def _row_to_overview_record(row: SiteRow) -> dict:
     zone = _dominant_zone(row.stats)
     return {
-        "slug": row.slug, "name": row.name, "region": row.region,
-        "character": row.character, "description": row.description or "",
-        "max_depth": row.max_depth, "lon": row.lon, "lat": row.lat,
-        "owd_pct":  row.stats.get("zone_owd_pct"),
+        "slug": row.slug,
+        "name": row.name,
+        "region": row.region,
+        "character": row.character,
+        "description": row.description or "",
+        "max_depth": row.max_depth,
+        "lon": row.lon,
+        "lat": row.lat,
+        "owd_pct": row.stats.get("zone_owd_pct"),
         "aowd_pct": row.stats.get("zone_aowd_pct"),
         "deep_pct": row.stats.get("zone_deep_pct"),
         "tech_pct": row.stats.get("zone_tech_pct"),
@@ -296,10 +384,16 @@ def build_overview_deck(rows: list[SiteRow]) -> pdk.Deck:
     """Overview map: clickable site markers on a CARTO basemap."""
     records = [_row_to_overview_record(r) for r in rows if r.lon and r.lat]
     layer = pdk.Layer(
-        "ScatterplotLayer", data=records,
-        get_position=["lon", "lat"], get_fill_color="color",
-        get_radius=600, radius_min_pixels=4, radius_max_pixels=18,
-        pickable=True, stroked=True, get_line_color=[30, 30, 30],
+        "ScatterplotLayer",
+        data=records,
+        get_position=["lon", "lat"],
+        get_fill_color="color",
+        get_radius=600,
+        radius_min_pixels=4,
+        radius_max_pixels=18,
+        pickable=True,
+        stroked=True,
+        get_line_color=[30, 30, 30],
         line_width_min_pixels=1,
     )
     lons = [r["lon"] for r in records]
@@ -307,7 +401,9 @@ def build_overview_deck(rows: list[SiteRow]) -> pdk.Deck:
     view = pdk.ViewState(
         longitude=float(np.mean(lons)) if lons else 2.5,
         latitude=float(np.mean(lats)) if lats else 41.5,
-        zoom=7.5, pitch=0, bearing=0,
+        zoom=7.5,
+        pitch=0,
+        bearing=0,
     )
     tooltip = {
         "html": (
@@ -318,12 +414,18 @@ def build_overview_deck(rows: list[SiteRow]) -> pdk.Deck:
             "Deep {deep_pct}% · Tech {tech_pct}%<br/>"
             "<span style='color:#1f78b4;'>Click marker to open 3D view →</span>"
         ),
-        "style": {"backgroundColor": "white", "color": "#222",
-                  "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
+        "style": {
+            "backgroundColor": "white",
+            "color": "#222",
+            "fontFamily": "system-ui, sans-serif",
+            "fontSize": "12px",
+        },
     }
     return pdk.Deck(
-        layers=[layer], initial_view_state=view,
-        map_style=BASEMAP_STYLE, tooltip=tooltip,  # pyright: ignore[reportArgumentType]
+        layers=[layer],
+        initial_view_state=view,
+        map_style=BASEMAP_STYLE,
+        tooltip=tooltip,  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -354,6 +456,7 @@ def _inject_overview_click_handler(html_path: Path) -> None:
 
 # -- Per-site deck ------------------------------------------------------------
 
+
 def _tooltip_for(spec: MetricSpec) -> dict:
     """Per-metric tooltip text."""
     if spec.slug == "depth":
@@ -371,37 +474,57 @@ def _tooltip_for(spec: MetricSpec) -> dict:
     )
     return {
         "html": body,
-        "style": {"backgroundColor": "white", "color": "#222",
-                  "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
+        "style": {
+            "backgroundColor": "white",
+            "color": "#222",
+            "fontFamily": "system-ui, sans-serif",
+            "fontSize": "12px",
+        },
     }
 
 
-def build_site_deck(site_row: SiteRow, records: list[dict],
-                    cell_metres: float, spec: MetricSpec) -> pdk.Deck:
-    """Per-site 3D view: GridCellLayer surface, ocean-blue canvas (no basemap)."""
+def build_site_deck(
+    site_row: SiteRow, records: list[dict], cell_metres: float, spec: MetricSpec
+) -> pdk.Deck:
+    """Per-site 3D view: GridCellLayer surface, ocean-blue canvas (no basemap).
+
+    The site name lives in the HTML tab bar, not in the scene: an
+    in-canvas TextLayer at z=0 gets clipped by the extruded terrain and
+    reads as a glitch from most camera angles.
+    """
     cell_layer = pdk.Layer(
-        "GridCellLayer", data=records,
+        "GridCellLayer",
+        data=records,
         cell_size=cell_metres,
-        get_position=["lon", "lat"], get_elevation="height_m",
+        get_position=["lon", "lat"],
+        get_elevation="height_m",
         elevation_scale=VERTICAL_EXAGGERATION,
         get_fill_color="color",
-        pickable=True, extruded=True, auto_highlight=True,
+        pickable=True,
+        extruded=True,
+        auto_highlight=True,
     )
-    label_layer = pdk.Layer(
-        "TextLayer",
-        data=[{"lon": site_row.lon, "lat": site_row.lat,
-               "text": f"{site_row.name} — {spec.label}"}],
-        get_position=["lon", "lat"], get_text="text",
-        get_size=22, get_color=[240, 240, 240],
-        get_alignment_baseline="'bottom'", billboard=True,
-    )
+    # Frame the analysis window instead of opening at a fixed zoom: a
+    # 150 m wreck window at zoom 13 is a ~10-pixel blob. Aim for the
+    # window spanning ~210 px at the focal plane (Web Mercator:
+    # mpp = 156543.03·cos(lat) / 2^zoom) — at pitch 55° the foreground
+    # stretches ~2-3×, so this fills the canvas with margin to orbit.
+    mpp_wanted = site_row.window_size / 210.0
+    lat = site_row.lat if site_row.lat is not None else 41.5  # Catalan coast
+    zoom = math.log2(156543.03 * math.cos(math.radians(lat)) / mpp_wanted)
+    zoom = min(max(zoom, 13.0), 17.5)
     view = pdk.ViewState(
-        longitude=site_row.lon, latitude=site_row.lat,
-        zoom=13, pitch=55, bearing=0,
+        longitude=site_row.lon,
+        latitude=site_row.lat,
+        zoom=zoom,
+        pitch=55,
+        bearing=0,
     )
     return pdk.Deck(
-        layers=[cell_layer, label_layer], initial_view_state=view,
-        map_style=None, map_provider=None,  # pyright: ignore[reportArgumentType]
+        layers=[cell_layer],
+        initial_view_state=view,
+        map_style=None,
+        map_provider=None,  # pyright: ignore[reportArgumentType]
         tooltip=_tooltip_for(spec),  # pyright: ignore[reportArgumentType]
     )
 
@@ -410,7 +533,11 @@ def build_site_deck(site_row: SiteRow, records: list[dict],
 
 _SITE_STYLE = f"""
 <style>
+  /* pydeck's template sets body {{ overflow: hidden }}, which kills page
+     scrolling entirely — the stats/figure panels below the deck would be
+     unreachable. This block is injected after pydeck's, so it wins. */
   body {{ margin: 0; background: {OCEAN_BG};
+         overflow-y: auto; overflow-x: hidden;
          font-family: system-ui, sans-serif; color: #eee; }}
   #deck-container {{ position: relative; width: 100vw; height: 80vh;
                      background: {OCEAN_BG} !important; }}
@@ -428,6 +555,13 @@ _SITE_STYLE = f"""
   #sotamar-tabs a:hover {{ color: #fff; }}
   #sotamar-tabs a.active {{
     color: #fff; border-bottom-color: #1f78b4; background: #0a3d62;
+  }}
+  #sotamar-tabs a.back {{
+    color: #9fc6e8; border-right: 1px solid #0a3d62; margin-right: 8px;
+  }}
+  #sotamar-tabs .site {{
+    padding: 10px 14px 10px 4px; color: #fff;
+    font-size: 13px; font-weight: 600;
   }}
   .metric-caption {{
     background: #07304d; color: #b0c4de; padding: 6px 18px 8px 18px;
@@ -462,6 +596,24 @@ _SITE_STYLE = f"""
   #sotamar-legend .note {{
     margin-top: 8px; font-style: italic; color: #555; font-size: 11px;
   }}
+  #sotamar-legend .grad {{
+    height: 12px; border: 1px solid #555; border-radius: 2px;
+  }}
+  #sotamar-legend .gradlabels {{
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: #333; margin-top: 2px;
+  }}
+
+  #sotamar-scroll-hint {{
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.65); color: #fff;
+    padding: 10px 18px; border-radius: 6px;
+    font: 13px system-ui, sans-serif;
+    opacity: 0; transition: opacity 0.25s ease;
+    pointer-events: none; z-index: 12;
+  }}
+  #sotamar-scroll-hint.visible {{ opacity: 1; }}
 
   #sotamar-panels {{
     padding: 20px 24px 40px 24px; color: #eee;
@@ -485,9 +637,14 @@ _SITE_STYLE = f"""
 """
 
 
-def _render_tab_bar(active_slug: str,
-                    available_slugs: list[str]) -> str:
-    parts = ['<div id="sotamar-tabs">']
+def _render_tab_bar(
+    active_slug: str, available_slugs: list[str], site_name: str
+) -> str:
+    parts = [
+        '<div id="sotamar-tabs">',
+        '<a class="back" href="../index.html">← All sites</a>',
+        f'<span class="site">{escape(site_name)}</span>',
+    ]
     active_caption = ""
     for m in METRICS:
         if m.slug not in available_slugs:
@@ -498,22 +655,71 @@ def _render_tab_bar(active_slug: str,
             active_caption = m.caption
     parts.append("</div>")
     if active_caption:
-        parts.append(
-            f'<div class="metric-caption">{active_caption}</div>'
-        )
+        parts.append(f'<div class="metric-caption">{active_caption}</div>')
     return "".join(parts)
 
 
-_LEGEND_BODY = f"""
+_LEGEND_NOTE = (
+    "Column height = rise above the deepest point in the window, "
+    f"×{VERTICAL_EXAGGERATION:g} vertical exaggeration. Taller = shallower "
+    "reef; flat floor = deepest parts. Emerged land (elevation &gt; 0 m) is "
+    "excluded from the analysis."
+)
+
+_ZONE_LEGEND_BODY = f"""
 <div id="sotamar-legend">
   <h4>Dive zone (by depth)</h4>
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[0]};"></span>Zone 1 — OWD (0 to −18 m)</div>
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[1]};"></span>Zone 2 — AOWD (−18 to −30 m)</div>
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[2]};"></span>Zone 3 — Deep (−30 to −40 m)</div>
   <div class="row"><span class="sw" style="background:{ZONE_COLORS[3]};"></span>Zone 4 — Technical (&lt; −40 m)</div>
-  <div class="note">Column height = rise above the deepest point in the window, ×{VERTICAL_EXAGGERATION:g} vertical exaggeration. Taller = shallower reef; flat floor = deepest parts. Emerged land (elevation &gt; 0 m) is excluded from the analysis.</div>
+  <div class="note">{_LEGEND_NOTE}</div>
 </div>
 """
+
+
+def _cmap_css_gradient(cmap_name: str, n_stops: int = 12) -> str:
+    """CSS linear-gradient sampling a matplotlib colormap left→right."""
+    cmap = colormaps[cmap_name]
+    stops = ", ".join(mcolors.to_hex(cmap(i / (n_stops - 1))) for i in range(n_stops))
+    return f"linear-gradient(to right, {stops})"
+
+
+def _legend_for(spec: MetricSpec, arr: np.ndarray) -> str:
+    """Legend matched to the active metric: zone swatches for the discrete
+    dive-zone tab, otherwise the metric's colormap as a gradient bar
+    labelled with this site's actual value range."""
+    if spec.norm == "zone":
+        return _ZONE_LEGEND_BODY
+    norm = _normaliser(spec, arr)
+    # _normaliser always sets both bounds; the Nones are only in the stubs.
+    vmin = float(norm.vmin) if norm.vmin is not None else 0.0
+    vmax = float(norm.vmax) if norm.vmax is not None else 1.0
+
+    def fmt(v: float, signed: bool = False) -> str:
+        text = f"{v:+.{spec.precision}f}" if signed else f"{v:.{spec.precision}f}"
+        return f"{text}{spec.units}"
+
+    if spec.norm == "symmetric_p99":
+        labels = (fmt(vmin, signed=True), fmt(0.0), fmt(vmax, signed=True))
+    else:
+        labels = (fmt(vmin), fmt((vmin + vmax) / 2.0), fmt(vmax))
+    spans = "".join(f"<span>{t}</span>" for t in labels)
+
+    note = _LEGEND_NOTE
+    if spec.norm.endswith("_p99"):
+        note = (
+            "Colour range clipped at the 99th percentile for contrast "
+            "(extremes saturate). " + _LEGEND_NOTE
+        )
+    return (
+        '<div id="sotamar-legend">'
+        f"<h4>{spec.label}</h4>"
+        f'<div class="grad" style="background:{_cmap_css_gradient(spec.cmap)};"></div>'
+        f'<div class="gradlabels">{spans}</div>'
+        f'<div class="note">{note}</div>'
+        "</div>"
+    )
 
 
 def _fmt(v, suffix: str = "", places: int = 2) -> str:
@@ -524,6 +730,7 @@ def _fmt(v, suffix: str = "", places: int = 2) -> str:
 
 def _render_stats_table(stats: dict) -> str:
     """HTML table fragment summarising stats.json."""
+
     def cell_quad(key: str, unit: str = "", places: int = 2) -> str:
         s = stats.get(key) or {}
         parts = [_fmt(s.get(k), unit, places) for k in ("min", "max", "mean", "std")]
@@ -537,9 +744,14 @@ def _render_stats_table(stats: dict) -> str:
         ("Broad BPI", "min / max / mean / std", cell_quad("bpi_broad", "", 2)),
         ("VRM", "min / max / mean / std", cell_quad("vrm", "", 3)),
         ("VRM > 0.003", "", _fmt(stats.get("vrm_pct_above_003"), " %", 2)),
-        ("Dive zones", "OWD / AOWD / Deep / Tech",
-         " / ".join(_fmt(zones.get(k), " %", 1)
-                    for k in ("owd_pct", "aowd_pct", "deep_pct", "tech_pct"))),
+        (
+            "Dive zones",
+            "OWD / AOWD / Deep / Tech",
+            " / ".join(
+                _fmt(zones.get(k), " %", 1)
+                for k in ("owd_pct", "aowd_pct", "deep_pct", "tech_pct")
+            ),
+        ),
         ("NoData (survey gap)", "", _fmt(stats.get("nodata_pct"), " %", 2)),
         ("Emerged (above sea)", "", _fmt(stats.get("emerged_pct"), " %", 2)),
     ]
@@ -583,6 +795,11 @@ _SITE_CANVAS_SCRIPT = """
 
     var bar = document.getElementById('sotamar-scalebar');
     if (!bar || typeof deckInstance === 'undefined') return;
+    // Anchor the scale bar to the 3D container, not the document: as a
+    // direct <body> child its absolute position resolves against the
+    // page, where it overlaps the panels and scrolls away with them.
+    var dc = document.getElementById('deck-container');
+    if (dc) dc.appendChild(bar);
     var barEl = bar.querySelector('.bar');
     var labelEl = bar.querySelector('.label');
 
@@ -621,28 +838,118 @@ _SITE_CANVAS_SCRIPT = """
 </script>
 """
 
+# Persist the deck.gl camera across metric tabs. Each tab is a separate
+# static page, so without this every switch snaps back to the build-time
+# initialViewState and whatever orientation the user set up is lost. The
+# live viewState is mirrored into sessionStorage (keyed by the site
+# directory) and re-applied on the next page load.
+_SITE_CAMERA_SCRIPT = """
+<script>
+  (function () {
+    if (typeof deckInstance === 'undefined') return;
+    var storage = null;
+    try { storage = window.sessionStorage; } catch (err) { return; }
+    if (!storage) return;
+    var key = 'sotamar-camera:' + location.pathname.replace(/[^/]*$/, '');
+
+    deckInstance.setProps({
+      onViewStateChange: function (ev) {
+        if (!ev || !ev.viewState) return;
+        var vs = ev.viewState;
+        // Store only the plain camera fields; transition props don't
+        // survive JSON and must not leak into initialViewState.
+        var plain = {
+          longitude: vs.longitude, latitude: vs.latitude,
+          zoom: vs.zoom, pitch: vs.pitch, bearing: vs.bearing
+        };
+        try { storage.setItem(key, JSON.stringify(plain)); }
+        catch (err) { /* storage blocked — tabs just won't share camera */ }
+      }
+    });
+
+    var saved = null;
+    try { saved = JSON.parse(storage.getItem(key) || 'null'); }
+    catch (err) { saved = null; }
+    if (saved && typeof saved.longitude === 'number'
+              && typeof saved.latitude === 'number') {
+      // A fresh initialViewState object makes deck.gl rebase the camera.
+      deckInstance.setProps({ initialViewState: saved });
+    }
+  })();
+</script>
+"""
+
+# Wheel gate (cooperative gestures). The 3D canvas fills 80vh, and deck.gl
+# preventDefault()s every wheel event over it, so the stats table and
+# figures below the fold are unreachable with a mouse wheel. Standard
+# embedded-map fix: plain wheel scrolls the page, Ctrl/⌘ + wheel zooms the
+# deck. The capture-phase stopPropagation keeps unmodified wheels from
+# mjolnir.js's canvas listener (and its preventDefault), so the browser's
+# default page scroll proceeds. Trackpad pinch arrives as ctrl+wheel and
+# still zooms. A transient overlay teaches the modifier.
+_SITE_SCROLL_SCRIPT = """
+<script>
+  (function () {
+    var container = document.getElementById('deck-container');
+    if (!container) return;
+
+    var hint = document.createElement('div');
+    hint.id = 'sotamar-scroll-hint';
+    var mod = /Mac|iP(hone|ad|od)/.test(navigator.platform || '') ? '⌘' : 'Ctrl';
+    hint.textContent = 'Use ' + mod + ' + scroll to zoom the 3D view';
+    container.appendChild(hint);
+
+    var hideTimer = null;
+    container.addEventListener('wheel', function (e) {
+      if (e.ctrlKey || e.metaKey) return;  // deck.gl zooms
+      e.stopPropagation();                 // deck never sees it → page scrolls
+      hint.classList.add('visible');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () {
+        hint.classList.remove('visible');
+      }, 1200);
+    }, {capture: true, passive: true});
+  })();
+</script>
+"""
+
 
 def _inject_site_chrome(
-    html_path: Path, active_slug: str, available_slugs: list[str],
-    stats: dict, figures_present: dict[str, bool],
+    html_path: Path,
+    active_slug: str,
+    available_slugs: list[str],
+    stats: dict,
+    figures_present: dict[str, bool],
+    legend_html: str,
+    site_name: str,
 ) -> None:
-    """Add tab bar, legend, styles, scale bar, and bottom panels to a per-site HTML."""
+    """Add tab bar, metric legend, styles, scale bar, camera persistence,
+    and bottom panels to a per-site HTML."""
     html = html_path.read_text()
+    html = html.replace(
+        "<title>pydeck</title>", f"<title>{escape(site_name)} — SotAMar</title>", 1
+    )
     html = html.replace("</head>", f"{_SITE_STYLE}</head>")
-    tabs = _render_tab_bar(active_slug, available_slugs)
+    tabs = _render_tab_bar(active_slug, available_slugs, site_name)
     panels = _render_panels(stats, figures_present)
     html = html.replace(
         "<body>",
-        f"<body>{tabs}{_LEGEND_BODY}{_SCALEBAR_BODY}",
+        f"<body>{tabs}{legend_html}{_SCALEBAR_BODY}",
     )
+    html = html.replace("</body>", f"{panels}</body>")
+    # Scripts that touch deckInstance must come AFTER pydeck's own script,
+    # which the template places between </body> and </html> — injecting
+    # them at </body> would run them before deckInstance exists and their
+    # typeof guards would silently no-op (region pages already do this).
     html = html.replace(
-        "</body>",
-        f"{panels}{_SITE_CANVAS_SCRIPT}</body>",
+        "</html>",
+        f"{_SITE_CANVAS_SCRIPT}{_SITE_CAMERA_SCRIPT}{_SITE_SCROLL_SCRIPT}</html>",
     )
     html_path.write_text(html)
 
 
 # -- Orchestration ------------------------------------------------------------
+
 
 @dataclass
 class ViewerSummary:
@@ -662,7 +969,10 @@ def _copy_figure(src_dir: Path, dst_dir: Path, name: str) -> bool:
 
 
 def write_site_pages(
-    row: SiteRow, site_src_dir: Path, output_dir: Path, grid_size: int,
+    row: SiteRow,
+    site_src_dir: Path,
+    output_dir: Path,
+    grid_size: int,
 ) -> tuple[Path, int] | None:
     """Emit one HTML per metric plus copy the figures. Returns
     (site_output_dir, submerged_cell_count) or None if the site is unplayable.
@@ -681,15 +991,16 @@ def write_site_pages(
 
     # Load stats.json (per-site numerical summary).
     import json
+
     stats_path = site_src_dir / "stats.json"
     stats = json.loads(stats_path.read_text()) if stats_path.exists() else {}
 
     # Copy figures (both optional).
     figures_present = {
-        "terrain_analysis": _copy_figure(site_src_dir, site_out,
-                                         "terrain_analysis.png"),
-        "depth_profile":    _copy_figure(site_src_dir, site_out,
-                                         "depth_profile.png"),
+        "terrain_analysis": _copy_figure(
+            site_src_dir, site_out, "terrain_analysis.png"
+        ),
+        "depth_profile": _copy_figure(site_src_dir, site_out, "depth_profile.png"),
     }
 
     # First pass: figure out which metrics we can actually render for this
@@ -705,15 +1016,13 @@ def write_site_pages(
             continue
         tif = site_src_dir / spec.raster
         if not tif.exists():
-            log.warning("Missing raster for %s/%s, skipping tab",
-                        row.slug, spec.slug)
+            log.warning("Missing raster for %s/%s, skipping tab", row.slug, spec.slug)
             continue
         try:
             metric_windows[spec.slug] = downsample_raster(tif, grid_size)
             available.append(spec)
         except Exception:
-            log.exception("Downsample failed for %s/%s",
-                          row.slug, spec.raster)
+            log.exception("Downsample failed for %s/%s", row.slug, spec.raster)
 
     available_slugs = [m.slug for m in available]
 
@@ -725,8 +1034,19 @@ def write_site_pages(
         deck = build_site_deck(row, records, cell_metres, spec)
         html_path = site_out / f"{spec.slug}.html"
         deck.to_html(str(html_path), iframe_height=800, notebook_display=False)
-        _inject_site_chrome(html_path, spec.slug, available_slugs,
-                            stats, figures_present)
+        metric_window = metric_windows[spec.slug]
+        legend_arr = (
+            metric_window.arr if metric_window is not None else bathy_window.arr
+        )
+        _inject_site_chrome(
+            html_path,
+            spec.slug,
+            available_slugs,
+            stats,
+            figures_present,
+            legend_html=_legend_for(spec, legend_arr),
+            site_name=row.name,
+        )
 
     return site_out, cell_count
 
@@ -738,17 +1058,23 @@ def _read_region_bathymetry(
 ) -> RasterWindow:
     """Read a UTM bbox from the master COG, resampled to grid_size × grid_size."""
     from sotamar.io import find_cog
+
     cog = find_cog(cog_path)
     left, bottom, right, top = bounds
     with rasterio.open(cog) as src:
         if src.crs is None or src.crs.to_epsg() != 25831:
             raise ValueError(f"{cog}: expected EPSG:25831, got {src.crs}")
         window = rasterio.windows.from_bounds(
-            left, bottom, right, top, transform=src.transform,
+            left,
+            bottom,
+            right,
+            top,
+            transform=src.transform,
         )
         nodata = src.nodata
         data = src.read(
-            1, window=window,
+            1,
+            window=window,
             out_shape=(grid_size, grid_size),
             resampling=Resampling.average,
             boundless=True,
@@ -763,7 +1089,9 @@ def _read_region_bathymetry(
 
 
 def _region_records(
-    bathy: RasterWindow, max_abs: float, region_pois: list[SiteRow],
+    bathy: RasterWindow,
+    max_abs: float,
+    region_pois: list[SiteRow],
 ) -> list[dict]:
     """Build GridCellLayer records for a regional bathymetry window.
 
@@ -784,13 +1112,15 @@ def _region_records(
                 continue
             easting = left + (c + 0.5) * dx
             lon, lat = _utm_to_wgs84.transform(easting, northing)
-            records.append({
-                "lon": lon, "lat": lat,
-                "depth": round(z, 2),
-                "height_m": round(max_abs - abs(z), 2),
-                "color": [int(rgb[r, c, 0]), int(rgb[r, c, 1]),
-                          int(rgb[r, c, 2])],
-            })
+            records.append(
+                {
+                    "lon": lon,
+                    "lat": lat,
+                    "depth": round(z, 2),
+                    "height_m": round(max_abs - abs(z), 2),
+                    "color": [int(rgb[r, c, 0]), int(rgb[r, c, 1]), int(rgb[r, c, 2])],
+                }
+            )
     return records
 
 
@@ -809,35 +1139,94 @@ def build_region_deck(
         records = []
 
     cell_layer = pdk.Layer(
-        "GridCellLayer", data=records,
+        "GridCellLayer",
+        data=records,
         cell_size=cell_metres,
-        get_position=["lon", "lat"], get_elevation="height_m",
+        get_position=["lon", "lat"],
+        get_elevation="height_m",
         elevation_scale=VERTICAL_EXAGGERATION,
         get_fill_color="color",
-        pickable=False, extruded=True,
+        pickable=False,
+        extruded=True,
     )
 
+    # 3D beacon pins. Flat scatter dots at z=0 vanish behind the extruded
+    # terrain as soon as the camera tilts or zooms in, and their labels
+    # clip through the columns. Instead each POI gets a thin needle from
+    # the seabed to above the tallest terrain column, topped by a
+    # billboarded head and its label — visible from any angle, and both
+    # needle and head stay clickable.
+    beacon_top = max_abs * VERTICAL_EXAGGERATION + 30.0
     pin_data = [
         {
-            "lon": p.lon, "lat": p.lat, "name": p.name,
+            # Straight apostrophes break pydeck's expression parser when
+            # they appear in the TextLayer character set, so labels use
+            # the typographic ’ (L'Encalladora → L’Encalladora).
+            "lon": p.lon,
+            "lat": p.lat,
+            "name": p.name.replace("'", "’"),
+            "top": beacon_top,
             "color": _row_to_overview_record(p)["color"],
             "href": f"../{p.slug}/depth.html",
         }
-        for p in pois if p.lon and p.lat
+        for p in pois
+        if p.lon and p.lat
     ]
-    pin_layer = pdk.Layer(
-        "ScatterplotLayer", data=pin_data,
-        get_position=["lon", "lat"], get_fill_color="color",
-        get_radius=40, radius_min_pixels=6, radius_max_pixels=20,
-        pickable=True, stroked=True, get_line_color=[20, 20, 20],
+    # Needle radius is in metres: radius_units="pixels" renders giant
+    # cylinders through pydeck's JSON pipeline (deck.gl picks the wrong
+    # projection scale), so stick to world units — ~3 px at the default
+    # zoom, a slim pole when zoomed in. Flat-lit white, not zone-coloured:
+    # when the camera is down among the terrain columns the pole is the
+    # only part of the beacon in view, and viridis contains no white, so
+    # it stays unmissable at every zoom (the head keeps the zone colour).
+    # Markers render with the depth test disabled (luma.gl v9 parameter
+    # names): when the camera sits down among the terrain columns, any
+    # depth-tested marker is occluded by the nearer columns — beacons
+    # must draw through the terrain, like waypoints in a game HUD.
+    _XRAY = {"depthCompare": "always", "depthWriteEnabled": False}
+    needle_layer = pdk.Layer(
+        "ColumnLayer",
+        data=pin_data,
+        get_position=["lon", "lat"],
+        get_elevation="top",
+        radius=10,
+        get_fill_color=[250, 250, 252],
+        material=False,
+        pickable=True,
+        extruded=True,
+        auto_highlight=True,
+        parameters=_XRAY,
+    )
+    head_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=pin_data,
+        get_position=["lon", "lat", "top"],
+        get_fill_color="color",
+        billboard=True,
+        get_radius=12,
+        radius_min_pixels=5,
+        radius_max_pixels=14,
+        pickable=True,
+        stroked=True,
+        get_line_color=[255, 255, 255],
         line_width_min_pixels=2,
+        parameters=_XRAY,
     )
     label_layer = pdk.Layer(
-        "TextLayer", data=pin_data,
-        get_position=["lon", "lat"], get_text="name",
+        "TextLayer",
+        data=pin_data,
+        get_position=["lon", "lat", "top"],
+        get_text="name",
         get_color=[255, 255, 255],
-        get_size=12, get_pixel_offset=[10, -10],
-        get_alignment_baseline="'bottom'", billboard=True,
+        get_size=12,
+        get_pixel_offset=[0, -16],
+        get_alignment_baseline="'bottom'",
+        billboard=True,
+        background=True,
+        get_background_color=[7, 48, 77, 200],
+        background_padding=[4, 2],
+        character_set=_LABEL_CHARSET,
+        parameters=_XRAY,
     )
 
     lons = [float(r["lon"]) for r in pin_data]
@@ -845,16 +1234,24 @@ def build_region_deck(
     view = pdk.ViewState(
         longitude=float(np.mean(lons)) if lons else 2.5,
         latitude=float(np.mean(lats)) if lats else 41.5,
-        zoom=14, pitch=45, bearing=0,
+        zoom=14,
+        pitch=45,
+        bearing=0,
     )
     tooltip = {
         "html": "<b>{name}</b><br/><i style='color:#1f78b4;'>Click pin → site page</i>",
-        "style": {"backgroundColor": "white", "color": "#222",
-                  "fontFamily": "system-ui, sans-serif", "fontSize": "12px"},
+        "style": {
+            "backgroundColor": "white",
+            "color": "#222",
+            "fontFamily": "system-ui, sans-serif",
+            "fontSize": "12px",
+        },
     }
     return pdk.Deck(
-        layers=[cell_layer, pin_layer, label_layer], initial_view_state=view,
-        map_style=None, map_provider=None,  # pyright: ignore[reportArgumentType]
+        layers=[cell_layer, needle_layer, head_layer, label_layer],
+        initial_view_state=view,
+        map_style=None,
+        map_provider=None,  # pyright: ignore[reportArgumentType]
         tooltip=tooltip,  # pyright: ignore[reportArgumentType]
     )
 
@@ -870,8 +1267,8 @@ def _inject_region_chrome(html_path: Path, region_name: str, n_pois: int) -> Non
         '<div id="sotamar-region-header">'
         f'<a href="../index.html">← Back to overview</a> · '
         f'<b>{region_name}</b> &nbsp;<span class="meta">'
-        f'{n_pois} sites · click a pin to drill in</span>'
-        '</div>'
+        f"{n_pois} sites · click a pin to drill in</span>"
+        "</div>"
     )
     html = html.replace("</head>", f"{_SITE_STYLE}{_REGION_HEADER_CSS}</head>")
     html = html.replace(
@@ -902,10 +1299,13 @@ _REGION_HEADER_CSS = """
 
 
 def write_region_pages(
-    rows: list[SiteRow], output_dir: Path,
+    rows: list[SiteRow],
+    output_dir: Path,
     cog_path: Path | None = None,
-    min_pois: int = 3, max_bbox_m: float = 4000,
-    grid_size: int = 200, margin_m: float = 200,
+    min_pois: int = 3,
+    max_bbox_m: float = 4000,
+    grid_size: int = 200,
+    margin_m: float = 200,
 ) -> list[tuple[str, Path, int]]:
     """For each CSV region with ≥min_pois sites within max_bbox_m, write a
     regional 3D view with clickable POI pins.
@@ -932,12 +1332,17 @@ def write_region_pages(
         if width > max_bbox_m or height > max_bbox_m:
             log.info(
                 "Skipping region %s: bbox %.0fx%.0fm exceeds %.0fm limit",
-                region, width, height, max_bbox_m,
+                region,
+                width,
+                height,
+                max_bbox_m,
             )
             continue
         try:
             bathy = _read_region_bathymetry(
-                (left, bottom, right, top), cog_path, grid_size,
+                (left, bottom, right, top),
+                cog_path,
+                grid_size,
             )
         except Exception as exc:
             log.warning("Skipping region %s: COG read failed (%s)", region, exc)
@@ -949,7 +1354,9 @@ def write_region_pages(
         region_dir.mkdir(parents=True, exist_ok=True)
         html_path = region_dir / "index.html"
         deck.to_html(
-            str(html_path), iframe_height=800, notebook_display=False,
+            str(html_path),
+            iframe_height=800,
+            notebook_display=False,
         )
         _inject_region_chrome(html_path, region, len(pois))
         generated.append((region, html_path, len(pois)))
@@ -958,7 +1365,9 @@ def write_region_pages(
 
 
 def write_viewer(
-    rows: list[SiteRow], output_dir: Path, sites_dir: Path,
+    rows: list[SiteRow],
+    output_dir: Path,
+    sites_dir: Path,
     grid_size: int = 100,
     cog_path: Path | None = None,
 ) -> ViewerSummary:
@@ -982,15 +1391,16 @@ def write_viewer(
 
     overview_path = output_dir / "index.html"
     build_overview_deck(renderable).to_html(
-        str(overview_path), iframe_height=800, notebook_display=False,
+        str(overview_path),
+        iframe_height=800,
+        notebook_display=False,
     )
     _inject_overview_click_handler(overview_path)
 
     sites_out: list[tuple[str, Path, int]] = []
     for row in renderable:
         try:
-            result = write_site_pages(row, sites_dir / row.slug,
-                                      output_dir, grid_size)
+            result = write_site_pages(row, sites_dir / row.slug, output_dir, grid_size)
         except Exception as exc:
             log.exception("Site render failed for %s", row.slug)
             skipped.append((row.slug, str(exc)))
@@ -1005,7 +1415,9 @@ def write_viewer(
     # tightly enough (≥3 POIs, bbox ≤4 km on each axis).
     try:
         regions_out = write_region_pages(
-            renderable, output_dir, cog_path=cog_path,
+            renderable,
+            output_dir,
+            cog_path=cog_path,
         )
     except Exception as exc:
         log.exception("Region pages failed")
@@ -1016,13 +1428,16 @@ def write_viewer(
         _inject_overview_region_sidebar(overview_path, regions_out)
 
     return ViewerSummary(
-        overview=overview_path, sites=sites_out, regions=regions_out,
+        overview=overview_path,
+        sites=sites_out,
+        regions=regions_out,
         skipped=skipped,
     )
 
 
 def _inject_overview_region_sidebar(
-    overview_path: Path, regions: list[tuple[str, Path, int]],
+    overview_path: Path,
+    regions: list[tuple[str, Path, int]],
 ) -> None:
     """Append a small sidebar panel listing regional drill-down links."""
     items = "".join(
@@ -1032,10 +1447,10 @@ def _inject_overview_region_sidebar(
     )
     sidebar = (
         '<div id="sotamar-regions">'
-        '<h4>Regional 3D views</h4>'
-        f'<ul>{items}</ul>'
+        "<h4>Regional 3D views</h4>"
+        f"<ul>{items}</ul>"
         '<div class="hint">Drill into a cluster of nearby dive sites.</div>'
-        '</div>'
+        "</div>"
     )
     css = """
 <style>
